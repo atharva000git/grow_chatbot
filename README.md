@@ -142,6 +142,14 @@ results look stale. The run prints a stage table and writes `data/manifest.json`
 with the chunk count, embedding model, dimension, chunk strategy and a corpus
 hash, so a reviewer can tell whether the index matches the source files.
 
+**A fresh clone needs no network access for the corpus.** The cleaned documents in
+`data/clean/` are committed, and the loader returns cached text when it is
+present, so the command above rebuilds all 349 vectors offline in about 13
+seconds. Only the *first* embedding call on a new machine reaches HuggingFace, to
+download `all-MiniLM-L6-v2` (~90 MB) into the local model cache. The 11 MB source
+PDF and the 40 MB Chroma index are gitignored and are not needed to rebuild
+either.
+
 ## 6. Tests and evaluation
 
 ```bash
