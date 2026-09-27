@@ -780,10 +780,10 @@ print('count after 2nd run', chromadb.PersistentClient(path=settings.CHROMA_DIR)
 
 ### Acceptance criteria
 
-- [ ] Manifest reports 5 docs and a chunk count equal to Phase 3's
+- [ ] Manifest reports 10 docs and a chunk count equal to Phase 3's (the original criterion said 5 docs; the corpus was extended to 10 documents in Phase 2)
 - [ ] `c.count()` equals the chunk count — stable across two consecutive runs (no accumulation)
 - [ ] `c.metadata` shows cosine space
-- [ ] A peeked record shows all five metadata fields
+- [ ] A peeked record shows all five metadata fields (plus `fetched_at`, added in Phase 5)
 - [ ] `--rebuild` produces an identical count
 
 ### Do not do in this phase

@@ -1,0 +1,23 @@
+{
+  "built_at": "2026-09-27T07:34:02+00:00",
+  "n_docs": 10,
+  "n_chunks": 201,
+  "n_sources": 6,
+  "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "embedding_dim": 384,
+  "chunk_strategy": "recursive",
+  "chunk_size": 800,
+  "chunk_overlap": 120,
+  "top_k": 4,
+  "similarity_threshold": 0.35,
+  "collection_name": "hdfc_faqs",
+  "corpus_hash": "21d8dabde5c4a916",
+  "sources": {
+    "https://groww.in/mutual-funds/hdfc-large-cap-fund-direct-growth": "2026-09-27",
+    "https://groww.in/mutual-funds/hdfc-equity-fund-direct-growth": "2026-09-27",
+    "https://groww.in/mutual-funds/hdfc-elss-tax-saver-fund-direct-plan-growth": "2026-09-27",
+    "https://groww.in/mutual-funds/hdfc-small-cap-fund-direct-growth": "2026-09-27",
+    "https://groww.in/mutual-funds/hdfc-balanced-advantage-fund-direct-growth": "2026-09-27",
+    "https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf": "2026-09-27"
+  }
+}
