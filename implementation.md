@@ -1438,7 +1438,7 @@ Manual checks:
 - [x] 3 example buttons present and clickable
 - [x] Sidebar shows chunk count > 0, model name, threshold
 - [x] 5 source links listed and clickable
-- [ ] A factual question returns ≤3 sentences + a citation + freshness line — **the only untested code path.** The validator, the citation allow-list, the sentence cap and the freshness line are each unit-tested against raw strings; the live provider call is not. **Needs `LLM_API_KEY`.**
+- [x] A factual question returns ≤3 sentences + a citation + freshness line — **verified live.** `The lock-in period is 3 years from the date of allotment` + allow-listed citation + freshness line, via both `answer_query` and the Streamlit UI. The live run then found two defects in this very path; see the Phase 13 record.
 - [x] "Should I buy HDFC Small Cap Fund now?" shows the refusal styling
 - [x] A PAN/phone input shows the PII-blocked styling
 - [x] A nonsense question shows the insufficient-context styling
@@ -1546,10 +1546,12 @@ python eval/run_eval.py
 ### Acceptance criteria
 
 - [x] `pytest` fully green, keyless — **130 passed in 0.4 s**
-- [ ] All 11 eval cases behave as expected — **4/11 keyless; 9/11 with a stubbed
-      model; 11/11 unverified.** The 4 that pass are the guard cases and are real
-      results; the other 7 record `ERROR:NO_KEY` rather than a fabricated score.
-      Closes with a key.
+- [x] All 11 eval cases behave as expected — **11/11 against a live model**
+      (Groq `qwen/qwen3.8-27b`), 100% grounding, 1.3 s mean. Two *expectations*
+      were corrected with recorded evidence, not the code: cases 4 and 10 spelled
+      the ELSS name `Direct - Growth` instead of the registry's
+      `Direct - Plan - Growth`, and case 6 assumed a "How to download" section
+      that occurs zero times in the corpus.
 - [x] Grounding rate 100% — no citation outside `sources.csv`
 - [x] Mean latency < 5 s — 0.45 s keyless
 - [x] `samples/sample_qa.md` generated, with an explicit notice that the factual
@@ -1701,7 +1703,7 @@ ls samples/
 
 - [x] P0–P12 complete, one commit each
 - [x] `pytest tests -q` green
-- [~] `python eval/run_eval.py` — **latency criterion met: 0.451 s mean against a < 5 s budget.** Grounding is unmeasurable keyless, because there are no answers to ground; 11/11 needs a key.
+- [x] `python eval/run_eval.py` — **11/11, grounding 100% (6/6), mean latency 1.275 s against a < 5 s budget, exit 0.**
 - [x] `streamlit run app.py` demonstrates: factual answer with citation, advice refusal, PII block, out-of-scope refusal — via `AppTest` in Phase 10, keyless; the factual row needs a key
 - [x] `config/sources.csv` is the only place a URL appears in code
 - [x] `data/manifest.json` records model, dim, chunk strategy and corpus hash
@@ -1837,3 +1839,89 @@ during that phase", which is not evidence. They were re-measured:
 Worth stating plainly: re-running the earlier criteria found **no regression**.
 The 29 boxes that had gone unticked were unticked for bookkeeping, not because
 the behaviour had rotted.
+
+---
+
+## Phase 13 — Live verification with a real provider
+
+Run with a Groq key (`qwen/qwen3.8-27b`) configured. Purpose: close the one path
+that 154 keyless tests could not reach. It did, and it found two defects — which
+is the finding worth keeping, because both are *interaction* bugs: code that is
+correct in isolation and wrong against a model that volunteers more than a stub
+does.
+
+**Result.** `11/11`, grounding `6/6 = 100%`, mean latency `1.275 s` against a
+`< 5 s` budget, exit code 0. Streamlit verified by `AppTest`: no "unavailable"
+banner, and the advice, PII, out-of-scope and portfolio-advice paths all render
+their refusals.
+
+### 1. The model could state the freshness date
+
+`FRESHNESS_RE` was `Last updated from sources:\s*(\d{4}-\d{2}-\d{2})` — matched by
+*date shape*. A model writing `Last updated from sources: 2024-01-01` therefore
+satisfied it, and check 7's `if not FRESHNESS_RE.search(text)` guard concluded a
+freshness line already existed and declined to append the real one. The result on
+screen: a **fabricated date presented under a line that reads like a system
+guarantee**, while `ChatResponse.last_updated` — a separate field, computed from
+the hits — held the correct value. Two different dates in one response, and the
+visible one was the model's.
+
+A partial date (`2026-09`, which the model produced by reading the factsheet's own
+URL) failed the pattern instead, so both lines survived and the answer carried
+two freshness lines.
+
+Fix, in the spirit of the existing check 4: match the **label**, delete every line
+carrying it, and rewrite one line from `newest_source_date(hits)`. The prompt no
+longer asks the model for a date at all, so the model is not asked to assert
+something it cannot know. Five regression tests, including a bold-markdown variant
+and the sentence-budget interaction.
+
+### 2. The performance guard refused a correct answer
+
+Case 5 asks for the benchmark and riskometer category of HDFC Balanced Advantage
+Fund. The model's answer was entirely factual:
+
+> The benchmark for the scheme is the NIFTY 50 Hybrid Composite Debt 50:50 Index
+> (Total Returns Index).
+
+`PERFORMANCE_PATTERNS[0]` is a bare `\breturn(s|ed|ing)?\b`, and "Total Returns
+Index" is the standard expansion of **TRI**, the stated benchmark of all five
+funds. The guard refused a correct factual answer over a word inside a proper
+noun. The keyless stub had never written an index name, so no test could have
+caught this.
+
+Fix: mask index names before the pattern sweep. That exemption is only safe with a
+countermeasure, and getting that wrong was instructive — my first attempt added
+proximity patterns requiring a figure within 24 characters, and they re-created the
+false positive by matching the `50:50` in "NIFTY 50 ... 50:50 Index" against the
+"Returns" 21 characters later. The working version requires a **`%` figure** within
+**15** characters, plus a dedicated pattern for a figure attached to an index name
+itself, and all three run against the original text. "Total Returns Index of 32%"
+is still refused; naming the index is allowed.
+
+Also fixed while in there: `\bhas (?:beaten|outperformed)\b` required a literal
+"has", so a plain "outperformed the benchmark by 4%" passed. Now optional.
+
+Nine refuse-cases and eight allow-cases are pinned, including a bare "Returns are
+calculated on the NAV of the previous day" that is still **refused** on purpose —
+ambiguous, and the product's bias is to refuse.
+
+### 3. Two eval expectations were wrong, not the code
+
+* Cases 4 and 10 expected the scheme `HDFC ELSS Tax Saver Fund - Direct - Growth`.
+  The canonical name in `config/sources.csv` is `... - Direct - Plan - Growth`, and
+  the system returned the canonical name correctly. The eval was wrong.
+* Case 6 expected an ANSWER about downloading a capital-gains statement, on the
+  note that it is "grounded in the factsheet's 'How to download' / servicing
+  section". `capital gain`, `How to download`, `Account statement`, `tax statement`,
+  `servicing` and `download` occur **zero** times across all ten cleaned documents.
+  The premise is false, servicing is out of scope per README §2, and answering it
+  would mean inventing a process — so `INSUFFICIENT_CONTEXT` is correct. Changed to
+  `ANSWER_OR_INSUFFICIENT` with the evidence recorded in the case, not silently.
+
+### 4. `.env`
+
+`LLM_BASE_URL` was absent and defaulted to `api.openai.com`, which would 401
+against a `gsk_` key. Set to `https://api.groq.com/openai/v1`. The pasted key also
+carried a stray `- ` prefix, which dotenv preserves — the value was literally
+`- gsk_...`. Both fixed. `.env` remains gitignored.

@@ -246,3 +246,123 @@ def test_well_formed_answers_pass_through(raw: str) -> None:
     r = validate(raw, hits(LARGE_CAP, FACTSHEET))
     assert r.intent == "ANSWER"
     assert validate_mod.count_sentences(r.answer_text) <= 3
+
+
+@pytest.mark.parametrize(
+    "invented",
+    [
+        "Last updated from sources: 2024-01-01",
+        "Last updated from sources: 2026-09",
+        "**Last updated from sources:** 2020-05-05",
+        "Last updated from sources: yesterday",
+        "Last updated from sources:",
+    ],
+    ids=["full-date", "partial", "markdown", "prose", "empty"],
+)
+def test_model_cannot_assert_the_freshness_date(invented: str) -> None:
+    """The date is the fetch date of the cited document, never the model's to state.
+
+    A date-*shaped* matcher is satisfied by a fabricated date, so the first
+    version of this let `2024-01-01` suppress the real one and put a made-up
+    date in front of the user under a line that reads like a system guarantee.
+    Anything carrying the label is removed and rewritten from the hits.
+    """
+    r = validate(f"The exit load is 1%.\n{invented}", hits(LARGE_CAP, FACTSHEET))
+    lines = [l for l in r.answer_text.splitlines() if "Last updated" in l]
+    assert len(lines) == 1, r.answer_text
+    assert lines[0] == f"Last updated from sources: {r.last_updated}"
+    assert "2024-01-01" not in r.answer_text
+    assert "2020-05-05" not in r.answer_text
+
+
+def test_exactly_one_freshness_line_when_the_model_emits_none() -> None:
+    r = validate(f"The exit load is 1%. Source: {LARGE_CAP}", hits(LARGE_CAP))
+    assert len(validate_mod.FRESHNESS_RE.findall(r.answer_text)) == 1
+
+
+def test_invented_date_does_not_consume_the_sentence_budget() -> None:
+    """The stripped line must not be counted, or a good answer gets truncated."""
+    raw = (
+        "The exit load is 1% if redeemed within 1 year. There is no load after "
+        "12 months. The factsheet is dated August 2026.\n"
+        "Last updated from sources: 2024-01-01"
+    )
+    r = validate(raw, hits(LARGE_CAP))
+    assert validate_mod.count_sentences(r.answer_text) <= 3
+    assert "12 months" in r.answer_text
+
+
+BENCHMARK_NAME = (
+    "The benchmark is the NIFTY 50 Hybrid Composite Debt 50:50 Index "
+    "(Total Returns Index)."
+)
+
+
+def test_naming_a_benchmark_index_is_not_a_performance_claim() -> None:
+    """"Total Returns Index" is the expansion of TRI, the stated benchmark of all
+    five funds. The bare `\\breturn(s|ed|ing)?\\b` pattern refused a purely factual
+    answer for containing it, which turned the Balanced Advantage benchmark eval
+    case into a REFUSAL. Found by running the eval against a real model - the
+    keyless stub never produced an index name.
+    """
+    assert not validate_mod.has_performance_language(BENCHMARK_NAME)
+    r = validate(f"{BENCHMARK_NAME} Source: {LARGE_CAP}", hits(LARGE_CAP))
+    assert r.intent == "ANSWER"
+    assert "NIFTY 50 Hybrid" in r.answer_text
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Total Returns Index of 32% in 5 years",
+        "Total Returns Index returned 32%",
+        "The fund returned 32% last year",
+        "returns 15% in 3 years",
+        "15% returns over 5 years",
+        "outperformed the benchmark by 4%",
+        "underperformed the index by 2%",
+        "highest returns among large cap funds",
+        "CAGR of 14.2% since inception",
+    ],
+    ids=[
+        "loophole-index-plus-figure", "loophole-index-plus-verb",
+        "verb-plus-figure", "figure-plus-period", "figure-before-word",
+        "outperformed-no-has", "underperformed", "superlative", "cagr",
+    ],
+)
+def test_the_index_exemption_is_not_a_loophole(claim: str) -> None:
+    """Masking the index name must not become a way to state a figure.
+
+    These run against the ORIGINAL text, which is why the proximity patterns
+    require a `%` and a short window - an earlier version accepted bare digits
+    and matched the "50:50" of the index name against "Returns" 21 characters
+    away, reintroducing the very false positive it was written to fix.
+    """
+    assert validate_mod.has_performance_language(claim)
+    assert validate(claim, hits(LARGE_CAP, FACTSHEET)).intent == "REFUSAL"
+
+
+@pytest.mark.parametrize(
+    "factual",
+    [
+        "The benchmark is Nifty 50 TRI.",
+        "Benchmark: NIFTY 50 Hybrid Composite Debt 50:50 Index (TRI).",
+        "The exit load is 1% if redeemed within 1 year.",
+        "The expense ratio is 1.03% annually.",
+        "Stamp duty is 0.005% on investment.",
+        "The lock-in period is 3 years from the date of allotment.",
+    ],
+    ids=["tri-abbrev", "tri-parens", "exit-load", "expense-ratio", "stamp-duty", "lock-in"],
+)
+def test_real_facts_are_not_mistaken_for_performance(factual: str) -> None:
+    assert not validate_mod.has_performance_language(factual)
+    assert validate(factual, hits(LARGE_CAP, FACTSHEET)).intent == "ANSWER"
+
+
+def test_bare_return_word_is_still_refused() -> None:
+    """Deliberately conservative. A bare "returns" with no figure attached is
+    ambiguous, and the product's bias is to refuse rather than to allow a
+    performance sentence through."""
+    assert validate_mod.has_performance_language(
+        "Returns are calculated on the NAV of the previous day."
+    )

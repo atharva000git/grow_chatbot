@@ -21,13 +21,20 @@ from src.generation.prompt import citation_allowlist, newest_source_date
 
 URL_RE = re.compile(r"https?://[^\s<>\"')\]]+")
 SOURCE_LINE_RE = re.compile(r"^\s*Source:\s*(\S+)\s*$")
-FRESHNESS_RE = re.compile(r"Last updated from sources:\s*(\d{4}-\d{2}-\d{2})")
+# Matched by LABEL, not by date, and that is the whole point. A date-shaped
+# pattern is satisfied by a fabricated one: a model writing
+# "Last updated from sources: 2024-01-01" would suppress the real date computed
+# from the retrieved chunks, and the user would read a made-up date under a line
+# that looks like a system guarantee. Anything carrying this label is removed and
+# rewritten from `newest_source_date`, so the model cannot influence it. re.M lets
+# one pattern serve both the per-line filters and a whole-answer `search`.
+FRESHNESS_RE = re.compile(r"^[^\S\n]*(?:\*\*)?Last updated from sources:.*$", re.I | re.M)
 SENTENCE_RE = re.compile(r"[^.!?]+[.!?]+")
 
 PERFORMANCE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\breturn(s|ed|ing)?\b", re.I),
     re.compile(r"\bCAGR\b", re.I),
-    re.compile(r"\bhas (?:beaten|outperformed|outperformed)\b", re.I),
+    re.compile(r"\b(?:has |have |had )?(?:beaten|outperformed|underperformed)\b", re.I),
     re.compile(r"\btop performing\b|\bbest performing\b", re.I),
     re.compile(r"\bNAV trend", re.I),
     # A bare percentage needs a return word nearby to count, so this rule only
@@ -38,6 +45,26 @@ PERFORMANCE_PATTERNS: tuple[re.Pattern[str], ...] = (
     # bare "month", and the return words above still catch "returned 32%".
     re.compile(r"\d+(?:\.\d+)?\s*%\s*(?:in|over)\s*(?:the\s*)?(?:\d+\s*)?(?:years?|months?|yrs?)\b", re.I),
 )
+
+# These run against the ORIGINAL text, because they exist to catch a figure that
+# the index-name mask below would otherwise hide. Each requires a percentage, not
+# a bare number: an earlier version accepted any digits and then matched the "50:50"
+# in "NIFTY 50 Hybrid Composite Debt 50:50 Index (Total Returns Index)" against the
+# "Returns" 21 characters later, re-creating the false positive it was meant to
+# prevent. The window is deliberately short.
+PERFORMANCE_PROXIMITY: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\breturn(?:s|ed|ing)?\b[^.!?]{0,15}?\d+(?:\.\d+)?\s*%", re.I),
+    re.compile(r"\d+(?:\.\d+)?\s*%[^.!?]{0,15}?\breturn(?:s|ed|ing)?\b", re.I),
+    re.compile(r"\breturns?\s+index\b[^.!?]{0,12}?\d+(?:\.\d+)?\s*%", re.I),
+)
+
+# "Total Returns Index" is the standard expansion of TRI, and TRI is the stated
+# benchmark of all five funds. A model answering "which benchmark?" correctly
+# writes the index's own name, and the bare \breturn(s|ed|ing)?\b pattern refused
+# a purely factual answer because of it - measured, not theorised: it turned the
+# Balanced Advantage benchmark case into a performance refusal. Index names are
+# therefore masked before the main sweep.
+INDEX_NAME_RE = re.compile(r"\b(?:total\s+)?returns?\s+index\b|\bTR\s+index\b", re.I)
 
 ADVICE_OUTPUT_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\byou should\b", re.I),
@@ -115,7 +142,16 @@ def truncate_to_sentences(text: str, n: int) -> str:
 
 
 def has_performance_language(text: str) -> bool:
-    return any(pattern.search(text) for pattern in PERFORMANCE_PATTERNS)
+    """True when the answer makes a performance claim.
+
+    Index names are masked first, so naming a benchmark is not a claim; the
+    figure-adjacent patterns are then re-checked against the original text so
+    the mask cannot be used to smuggle a number past them.
+    """
+    if any(pattern.search(text) for pattern in PERFORMANCE_PROXIMITY):
+        return True
+    masked = INDEX_NAME_RE.sub(" ", text)
+    return any(pattern.search(masked) for pattern in PERFORMANCE_PATTERNS)
 
 
 def has_advice_language(text: str) -> bool:
@@ -190,8 +226,12 @@ def validate(raw: str, hits: list[RetrievedChunk]) -> ChatResponse:
     if has_advice_language(body):
         return _refusal(ADVICE_REFUSAL, top_url, hits)
 
-    # 7. Freshness line.
-    if not FRESHNESS_RE.search(text) and citation:
+    # 7. Freshness line. Every line the model wrote under this label is dropped
+    #    and one canonical line is appended, for the reason at FRESHNESS_RE: the
+    #    date is the fetch date of the cited documents, not something the model
+    #    gets to assert. Mirrors check 4's treatment of invented citations.
+    text = "\n".join(l for l in text.split("\n") if not FRESHNESS_RE.match(l)).strip()
+    if citation:
         date = newest_source_date(hits)
         if date:
             text = f"{text}\nLast updated from sources: {date}".strip()

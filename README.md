@@ -146,7 +146,7 @@ hash, so a reviewer can tell whether the index matches the source files.
 
 ```bash
 pip install -r eval/requirements.txt
-pytest tests -q                    # 130 tests, keyless, no network, ~0.4 s
+pytest tests -q                    # 154 tests, keyless, no network, ~0.5 s
 python eval/run_eval.py            # writes samples/sample_qa.md
 ```
 
@@ -160,8 +160,8 @@ against raw model strings, and the chunking invariants.
 citation grounding and latency, writes `samples/sample_qa.md`, and **exits
 non-zero if any case fails** so it works as a CI gate.
 
-Five of these tests failed against code that earlier phases had signed off, which
-is the argument for having written them: ten index chunks contained no fact at
+Several of these tests failed against code that earlier phases had signed off,
+which is the argument for having written them: ten index chunks contained no fact at
 all, a single adjective defeated an advice pattern, a lower-case PAN escaped
 detection, refusals carried a source date they had no right to, and the corpus
 turned out to contain the Groww returns tables. See `notes/chunking.md` §9 and
@@ -215,12 +215,38 @@ guarantee.
 There is no arithmetic over figures, no login, no transaction. The query log
 records sanitized text and an intent, and is a no-op unless `LOG_QUERIES=true`.
 
-**Answer quality is unverified against a real model.** The suite and the eval
-harness were built keyless, so the only untested path is the live provider call:
-keyless, `run_eval.py` reports 4/11 (the four guard cases) and records the rest as
-`ERROR:NO_KEY` rather than inventing answers. With a stubbed model the same
-runner reports 9/11 at 100% grounding. Both misses are artefacts of a
-deliberately naive stub. A single real run closes this.
+**Verified against a real model, and it found two defects.** With a key
+configured, `run_eval.py` reports **11/11, 100% grounding, 1.3 s mean latency**
+(Groq, `qwen/qwen3.8-27b`). That run was not a formality — it exposed two bugs
+that 154 keyless tests could not, because both needed a model that writes like a
+model rather than like a stub:
+
+* **The validator let the model state the freshness date.** `FRESHNESS_RE`
+  matched `Last updated from sources: <full date>`, so a model writing
+  `2024-01-01` *satisfied* the pattern and suppressed the real date computed from
+  the retrieved chunks — a fabricated date displayed under a line that reads like
+  a system guarantee. The label is now matched instead of the date, and the line
+  is always rewritten from the sources. The prompt no longer asks the model for a
+  date at all.
+* **The performance guard refused a correct answer.** Naming a benchmark means
+  writing "NIFTY 50 Hybrid Composite Debt 50:50 Index (**Total Returns** Index)",
+  and the bare `\breturn(s|ed|ing)?\b` pattern called that a performance claim.
+  Index names are now masked before the sweep, while three `%`-figure proximity
+  patterns run against the original text so the exemption cannot be used to
+  smuggle in "Total Returns Index of 32%".
+
+Neither was findable without a key. The lesson generalises: the guards and the
+validator are unit-tested, but only a real model exercises the *interaction*
+between what the model volunteers and what the validator assumes it will not.
+
+Two eval expectations were also wrong rather than the code. Case 4 and case 10
+named the ELSS fund `Direct - Growth` when the canonical registry name is
+`Direct - Plan - Growth`, and case 6 expected an answer about downloading a
+capital-gains statement on the stated premise that the factsheet has a "How to
+download" section — `capital gain`, `How to download` and `tax statement` occur
+**zero** times across all ten documents, and servicing is out of scope, so
+`INSUFFICIENT_CONTEXT` is the correct outcome. Both are recorded in
+`eval/queries.json`.
 
 **One scheme naming is inconsistent.** The corpus holds the Flexi Cap fund under
 its Groww name, `HDFC Equity Fund`, labelled
