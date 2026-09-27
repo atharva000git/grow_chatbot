@@ -90,8 +90,19 @@ at the specified 1.3× and the cases are recorded here instead.
 
 ## 5. Decision: `recursive` (default, unchanged)
 
-`CHUNK_STRATEGY` stays `"recursive"`. The spec framed semantic as an escalation
-available only if the data demanded it, and the data did not. Recursive matched
+`CHUNK_STRATEGY` stays `"recursive"`.
+
+> **Superseded after Phase 5.** This section originally compared the two
+> strategies and found recursive ahead. That comparison was invalid: both
+> strategies inherited the same granularity defect described in §7, so it ranked
+> two flawed options against each other. The finding below is kept because the
+> per-strategy numbers are still accurate; the decision it supports is not.
+> Granularity is now fixed in the chunker, and the two strategies have not been
+> re-compared under the fix — recursive remains the default on the grounds that
+> it is deterministic, respects `CHUNK_SIZE` exactly, and needs no model at
+> chunking time.
+
+The spec framed semantic as an escalation available only if the data demanded it. Recursive matched
 semantic on the fact that matters (both recover the ELSS lock-in as a contiguous
 span in exactly one chunk), and then beat it on every other axis: it covered
 **more** exit-load chunks (20 vs 14) and more min-amount chunks spanning **10**
@@ -126,3 +137,73 @@ via `python -m src.ingest.chunk`.
    limit; the only remedy would be OCR, which is not worth the dependency and
    the risk of misreading financial figures. Keep sector-allocation questions
    out of the demo question set.
+
+## 7. Addendum — fact-level granularity (added after Phase 5)
+
+Smoke-testing the Phase 5 index with live queries exposed a defect that
+supersedes the strategy comparison in §5.
+
+**Symptom.** The ELSS lock-in — the fact the factsheet was added to the corpus
+to capture — was unretrievable. Across six phrasings the chunk holding it
+scored 0.128–0.253 and never both ranked in the top 4 and cleared
+`SIMILARITY_THRESHOLD` (0.35), so retrieval would have answered
+`INSUFFICIENT_CONTEXT` on the demo's headline question. Scheme filtering did not
+help (rank 5–11 even within ELSS-only chunks), so this was granularity, not
+ranking or threshold tuning.
+
+**Cause.** §1 recorded that the factsheet packs expense ratio, benchmark,
+lock-in and exit load into one dense block. At 744 characters that chunk also
+absorbed the start of the holdings table, so its embedding averaged over four
+unrelated facts plus a table of bond tickers. A lock-in query matched weakly
+against that average. The single `section` label (`lock_in`) was correct while
+the chunk it labelled was not — a labelling fix could not have helped.
+
+**Fix.** `segment_facts` splits a factsheet at its all-caps metric headers, so
+each metric becomes its own chunk:
+
+```
+LOCK-IN PERIOD 3 years from the date of allotment of the respective Units   (73 chars)
+EXIT LOAD$$ Nil                                                             (15 chars)
+#BENCHMARK INDEX NIFTY 500 Index (TRI)                                       (38 chars)
+```
+
+Consecutive all-caps lines are absorbed into one header, because the holdings
+table wraps company names that way (`CORONA REMEDIES` / `LIMITED` /
+`Pharmaceuticals` / `& Biotechnology 0.42 0.00`). Without that, each fragment
+looked like its own header, fell under the minimum length and was dropped,
+leaving a `LIMITED Pharmaceuticals…` chunk with the holding's name gone. This
+was caught by a holdings-row integrity check and fixed before commit.
+
+Fact blocks use `FACT_MIN_CHARS = 25` rather than `MIN_CHUNK_CHARS = 80`:
+the lock-in fact is 73 characters, so the prose floor would have deleted a real
+fact. `MIN_CHUNK_CHARS` exists to strip nav crumbs from prose; a block
+introduced by a recognised metric header is not a crumb.
+
+Applied to PDF sources only. Groww pages already use `## ` headings and their
+all-caps lines are bond tickers inside holdings tables, so segmenting them would
+fragment prose; their chunk counts are unchanged (13/16/13/16/52 before and
+after).
+
+**Result.** 201 → 273 chunks, 96.4% of the previous corpus text retained, zero
+nav/boilerplate leakage, and all holdings rows intact.
+
+| query | before | after |
+| --- | --- | --- |
+| "lock-in period for ELSS" | rank 17, 0.168 | **rank 1, 0.604** |
+| "how long is the lock-in period" | rank 3, 0.179 | **rank 1, 0.685** |
+| "ELSS lock in period" | rank 17, 0.162 | **rank 1, 0.555** |
+| "lock in period of tax saver fund" | not retrieved | **rank 1, 0.537** |
+| "3 year lock in" | rank 1, 0.236 | **rank 1, 0.596** |
+| "can I redeem ELSS before 3 years" | not retrieved | rank 3, 0.349 |
+
+Five of six phrasings now resolve at rank 1. The sixth retrieves at rank 3 and
+0.349, 0.001 below the threshold — genuinely borderline, and worth re-checking
+once Phase 6 adds reranking.
+
+**Follow-on defect found while verifying the above:** Chroma's HNSW search is
+approximate and its default `hnsw:search_ef` is 10, barely above `TOP_K`. At
+`n_results=8` it silently dropped the lock-in chunk even though a full scan of
+all 273 records put it at rank 1 with 0.555. Pinning `hnsw:search_ef` and
+`hnsw:construction_ef` to 256 in the collection metadata fixed it. Without
+this, Phase 6 would have looked like it was working while missing the best
+match on roughly half of these queries.

@@ -1,11 +1,11 @@
 source_id,scheme,category,source_url,source_type,page_start,page_end
 hdfc-large-cap,HDFC Large Cap Fund - Direct - Growth,Large Cap,https://groww.in/mutual-funds/hdfc-large-cap-fund-direct-growth,html,0,0
-hdfc-flexi-cap,HDFC Equity Fund - Direct - Growth,Flexi Cap,https://groww.in/mutual-funds/hdfc-equity-fund-direct-growth,html,0,0
+hdfc-flexi-cap,HDFC Flexi Cap Fund - Direct - Growth,Flexi Cap,https://groww.in/mutual-funds/hdfc-equity-fund-direct-growth,html,0,0
 hdfc-elss,HDFC ELSS Tax Saver Fund - Direct - Plan - Growth,ELSS,https://groww.in/mutual-funds/hdfc-elss-tax-saver-fund-direct-plan-growth,html,0,0
 hdfc-small-cap,HDFC Small Cap Fund - Direct - Growth,Small Cap,https://groww.in/mutual-funds/hdfc-small-cap-fund-direct-growth,html,0,0
 hdfc-balanced-advantage,HDFC Balanced Advantage Fund - Direct - Growth,Balanced Advantage,https://groww.in/mutual-funds/hdfc-balanced-advantage-fund-direct-growth,html,0,0
 hdfc-fs-large-cap,HDFC Large Cap Fund - Direct - Growth,Large Cap,https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf,pdf,12,13
-hdfc-fs-flexi-cap,HDFC Equity Fund - Direct - Growth,Flexi Cap,https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf,pdf,7,8
+hdfc-fs-flexi-cap,HDFC Flexi Cap Fund - Direct - Growth,Flexi Cap,https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf,pdf,7,8
 hdfc-fs-elss,HDFC ELSS Tax Saver Fund - Direct - Plan - Growth,ELSS,https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf,pdf,63,64
 hdfc-fs-small-cap,HDFC Small Cap Fund - Direct - Growth,Small Cap,https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf,pdf,16,17
 hdfc-fs-balanced-advantage,HDFC Balanced Advantage Fund - Direct - Growth,Balanced Advantage,https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf,pdf,44,47

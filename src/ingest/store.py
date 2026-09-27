@@ -60,11 +60,23 @@ def build_metadatas(chunks: list[Chunk]) -> list[dict[str, str | int | float | b
     return metadatas
 
 
+COLLECTION_METADATA = {
+    "hnsw:space": "cosine",
+    # Chroma's default hnsw:search_ef is 10, which is barely above TOP_K. Its HNSW
+    # search is approximate, so a small ef silently drops strong neighbours: the
+    # ELSS lock-in chunk scored 0.555 (rank 1 of 273) yet went unreturned at
+    # n_results=8. Retrieval correctness depends on a generous candidate list,
+    # so it is pinned here rather than left to the default.
+    "hnsw:search_ef": 256,
+    "hnsw:construction_ef": 256,
+}
+
+
 @lru_cache(maxsize=1)
 def get_collection() -> chromadb.CollectionAPI:
     client = get_client()
     return client.get_or_create_collection(
-        name=settings.COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
+        name=settings.COLLECTION_NAME, metadata=dict(COLLECTION_METADATA)
     )
 
 

@@ -41,6 +41,16 @@ SECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 MID_LINE_START = re.compile(r"^[a-z,.;:%)\]]")
 PAGE_MARKER = re.compile(r"\.{2,}\s*Contd on next page", re.I)
 
+# A factsheet metric is an all-caps header line followed by its hard-wrapped
+# value: "LOCK-IN PERIOD" / "3 years from the date of allotment of the" /
+# "respective Units". FACT_MIN_CHARS is the floor for those blocks, and it is
+# deliberately far below MIN_CHUNK_CHARS: "LOCK-IN PERIOD 3 years from the date
+# of allotment of the respective Units" is 73 characters, so the prose floor
+# would silently delete a real fact. MIN_CHUNK_CHARS exists to strip nav crumbs
+# out of prose; a block introduced by a recognised metric header is not a crumb.
+FACT_MIN_CHARS = 25
+FACT_HEADER_MAX = 60
+
 
 class ChunkingError(RuntimeError):
     pass
@@ -133,6 +143,84 @@ def chunk_semantic(text: str, breakpoint_threshold: float = 85.0) -> list[str]:
     return chunks
 
 
+def is_fact_header(line: str) -> bool:
+    """True for a short, mostly-uppercase metric header such as `LOCK-IN PERIOD`
+    or `#BENCHMARK INDEX`."""
+    text = line.strip()
+    if not text or len(text) > FACT_HEADER_MAX:
+        return False
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) < 3:
+        return False
+    return sum(1 for c in letters if c.isupper()) / len(letters) >= 0.85
+
+
+def segment_facts(text: str) -> list[tuple[str, str]]:
+    """Split a factsheet into (header, body) blocks at its metric headers.
+
+    Consecutive all-caps lines are absorbed into a single header, because the
+    holdings table wraps company names that way:
+
+        CORONA REMEDIES
+        LIMITED
+        Pharmaceuticals
+        & Biotechnology 0.42 0.00
+
+    Treated line-by-line, "CORONA REMEDIES" looks like a metric header with an
+    empty body, falls under FACT_MIN_CHARS and is dropped, leaving a useless
+    "LIMITED Pharmaceuticals & Biotechnology 0.42 0.00" chunk with the holding's
+    name gone. Absorbing keeps the name, sector and weight together.
+
+    Header "" means a run of prose before the first metric, which is chunked as
+    ordinary text rather than treated as a fact.
+    """
+    lines = text.split("\n")
+    blocks: list[tuple[str, str]] = []
+    header: str | None = None
+    body: list[str] = []
+    for line in lines:
+        if is_fact_header(line):
+            if header is not None and any(part.strip() for part in body):
+                # previous header already has its value: close that block
+                blocks.append((header, "\n".join(body)))
+                header = line.strip()
+            elif header is not None:
+                # consecutive all-caps line: a wrapped name, absorb it
+                header = f"{header}\n{line.strip()}"
+            else:
+                header = line.strip()
+            body = []
+        else:
+            body.append(line)
+    if header is not None or any(part.strip() for part in body):
+        blocks.append((header or "", "\n".join(body)))
+    return blocks
+
+
+def chunk_facts(text: str, strategy: str) -> list[str]:
+    """One chunk per metric, so a fact is not averaged together with its
+    neighbours in the embedding.
+
+    Bundling was the cause of the ELSS lock-in being unretrievable: the fact
+    shared a 744-character chunk with the expense ratio, two benchmarks, the
+    exit load and the start of the holdings table, so a lock-in query scored
+    0.128-0.253 against it and never cleared SIMILARITY_THRESHOLD.
+    """
+    out: list[str] = []
+    for header, body in segment_facts(text):
+        block = "\n".join(part for part in (header, body) if part.strip()).strip()
+        if not block:
+            continue
+        if not header:
+            out.extend(c for c in chunk_recursive(block) if len(c.strip()) >= settings.MIN_CHUNK_CHARS)
+        elif len(block) <= settings.CHUNK_SIZE:
+            if len(block) >= FACT_MIN_CHARS:
+                out.append(block)
+        else:
+            out.extend(c for c in chunk_recursive(block) if len(c.strip()) >= settings.MIN_CHUNK_CHARS)
+    return out
+
+
 def _normalize(chunk: str) -> str:
     """Collapse the factsheet's hard line breaks into single spaces.
 
@@ -152,20 +240,24 @@ def _normalize(chunk: str) -> str:
 def chunk_document(doc: SourceDoc, strategy: str | None = None) -> list[Chunk]:
     text = Path(doc.clean_path).read_text(encoding="utf-8")
     chosen = (strategy or settings.CHUNK_STRATEGY).lower()
-    if chosen == "semantic":
-        raw = chunk_semantic(text)
-    elif chosen == "recursive":
-        raw = chunk_recursive(text)
-    else:
+    if chosen not in ("semantic", "recursive"):
         raise ChunkingError(f"unknown CHUNK_STRATEGY {chosen!r}; use 'recursive' or 'semantic'")
 
-    kept = [c for c in raw if len(c.strip()) >= settings.MIN_CHUNK_CHARS]
-    merged, merges, remaining = _merge_mid_line_starts(kept)
+    if doc.source_type == "pdf":
+        # Factsheet only: split metrics apart before the strategy runs. Groww
+        # pages already use "## " headings and their all-caps lines are bond
+        # tickers in holdings tables, so segmenting them would fragment prose.
+        raw = chunk_facts(text, chosen)
+    elif chosen == "semantic":
+        raw = chunk_semantic(text)
+    else:
+        raw = chunk_recursive(text)
+    merged, merges, remaining = _merge_mid_line_starts(raw)
     log.info(
-        "%s: %d raw -> %d kept (>=%d chars) -> %d chunks; %d mid-line start(s) merged, "
-        "%d kept because merging would exceed %d chars",
-        doc.source_id, len(raw), len(kept), settings.MIN_CHUNK_CHARS, len(merged),
-        merges, remaining, int(settings.CHUNK_SIZE * MERGE_CEILING),
+        "%s (%s): %d chunks; %d mid-line start(s) merged, %d kept because merging "
+        "would exceed %d chars",
+        doc.source_id, chosen, len(merged), merges, remaining,
+        int(settings.CHUNK_SIZE * MERGE_CEILING),
     )
 
     return [
