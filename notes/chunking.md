@@ -19,16 +19,19 @@ Two structural facts drove the implementation:
    `LOCK-IN PERIOD\n3 years from the date of allotment of the\nrespective Units`.
    Left as-is, the label and its value are never a contiguous span, so neither
    the encoder nor the answer generator can treat them as one fact.
-2. **The factsheet's portfolio/sector table extracts with dropped leading
-   capitals and doubled spaces** — 95 garbled lines, e.g.
-   `ood  roducts` for `Food Products`, `erospace    efense` for
-   `Aerospace Defense`. This is a **Phase 2 PDF-extraction defect, not a
-   chunking bug**: the splitter reproduces its input faithfully
-   (`RecursiveCharacterTextSplitter` was bisected with `keep_separator` both
-   ways and preserves every character). It is confined to the industry /
-   sector classification columns of the five factsheets — **0 garbled lines in
-   all five Groww documents** — and holding names, expense ratios, exit loads,
-   benchmarks and the lock-in are all clean. Follow-up: see §6.
+2. **One table per scheme is unrecoverable, not merely garbled.** On 4 of the
+   factsheet's 144 pages, the *Industry Allocation of Equity Holding of Net
+   Assets* summary table extracts as
+   `Industry  llocation of E uity  oldin  of Net  ssets` /
+   ` harmarmaceuticals    iotechnolo y` — leading characters dropped and spaces
+   expanded. This is **not a library defect and is not fixable by extraction
+   settings**: pypdf `plain` and `layout` and an independent PyMuPDF install all
+   return the same corruption, so the PDF's text layer for that table carries no
+   recoverable mapping. The region also contains **no digits at all**, so the
+   allocation percentages are absent, not just misaligned — there is nothing to
+   repair. The correct mitigation is to keep sector-allocation questions out of
+   the demo. The *holdings* table on the same pages (company, industry, % to
+   NAV) extracts cleanly, so "what are the top holdings" is unaffected.
 
 ## 2. Strategies compared
 
@@ -117,7 +120,9 @@ via `python -m src.ingest.chunk`.
    value form one span. This is what makes acceptance criterion 4 pass.
 4. **Chunk-count expectation revised** from 25–60 to 150–260: the original
    figure assumed 5 documents and the corpus is now 10.
-5. **Open (Phase 2 follow-up, not blocking):** 95 garbled lines in the
-   factsheets' sector/industry columns (§1.2). Worth a targeted repair before
-   the demo, since "what are the top sectors?" would surface them. Holding
-   names and every citable metric are unaffected.
+5. **Closed, no action available:** the per-scheme industry-allocation table
+   (§1.2) is unrecoverable at the PDF text-layer level on 4 of 144 pages. It
+   affects no citable metric and no holding name. Recorded as a known corpus
+   limit; the only remedy would be OCR, which is not worth the dependency and
+   the risk of misreading financial figures. Keep sector-allocation questions
+   out of the demo question set.
