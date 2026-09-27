@@ -23,7 +23,11 @@ from src.generation.validate import validate
 from src.models import Chunk, RetrievedChunk
 import src.logging_utils as logging_utils
 
-SECRET = "sk-not-a-real-key-DEADBEEF0123456789ABCDEF"
+# Deliberately NOT key-shaped. An earlier value began "sk-not-a-real-key-", which
+# is secret-scanner bait: GitHub push protection and most CI scanners match on
+# the prefix, not on whether the key works, so publishing it would raise a
+# false positive on a file that contains no secret.
+SECRET = "SENTINELCANARY0123456789abcdef"
 
 
 def _is_key_literal(node: ast.AST) -> bool:
@@ -140,6 +144,7 @@ def test_missing_key_error_never_echoes_a_value(monkeypatch: pytest.MonkeyPatch)
     assert "LLM_API_KEY" in message, "the error must name the variable"
     assert ".env" in message, "the error must say where to set it"
     assert SECRET not in message
+    assert "SENTINELCANARY" not in message
     assert "sk-" not in message, "the error must not echo anything key-shaped"
 
 
