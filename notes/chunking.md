@@ -207,3 +207,73 @@ all 273 records put it at rank 1 with 0.555. Pinning `hnsw:search_ef` and
 `hnsw:construction_ef` to 256 in the collection metadata fixed it. Without
 this, Phase 6 would have looked like it was working while missing the best
 match on roughly half of these queries.
+
+## 8. Addendum — Groww granularity and honest section labels (added in Phase 6)
+
+Querying the Phase 5 index with the spec's own questions exposed a second
+granularity defect, and one that only retrieval could reveal.
+
+**Symptom.** With the Phase 5 corpus the top-1 chunk contained the answer for
+**1 of 8** in-scope questions. Answers sat at rank 2, 3, 6 and 8, and the
+Balanced Advantage benchmark was absent from the top 10. The scheme pre-filter
+made this *look* fine - `scheme_ok=True` on every query - because it only proved
+the scheme matched, not that the answer did.
+
+**Cause.** Every chunk on a scheme's page repeats that scheme's name, so any
+query naming the fund matches all of them. The winners were the chunks with the
+most repetitions, not the most relevant:
+
+* a 583-character "About this fund" passage naming the fund five times beat the
+  real minimum-SIP answer (0.736 vs 0.563) and the real expense-ratio answer
+  (0.765 vs 0.518);
+* a 293-character factsheet page banner - `## PDF page 64 of 144` / `64 | August
+  2026` / `HDFC ELSS - Tax Saver Fund` - beat the 73-character lock-in fact
+  (0.694 vs 0.482) and pushed it to rank 6;
+* a fund-manager biography mentioned "benchmark" while describing performance
+  responsibility, so it outranked the actual index (0.620 vs 0.424).
+
+Note the shape of this: §7 fixed short facts being buried by *long* bundles, and
+this is the same bug inverted - long entity-heavy prose burying short exact
+facts. Entity overlap, not topic overlap, was deciding the ranking.
+
+**Fixes.**
+
+1. `strip_page_headers` removes the repeated factsheet page banner. It appears on
+   2 of the ELSS factsheet's pages, so the removal is narrow.
+2. `segment_fields` splits Groww's bare metric pairs (`Min. for SIP` / `₹100`,
+   `Fund size (AUM)` / `₹41,890.86 Cr`) into atomic chunks, matching what §7 did
+   for factsheets. An explicit `GROWW_METRICS` allow-list, not a shape heuristic:
+   "any short line over a short line with a digit" also matches the
+   return-calculator and peer-comparison grids.
+3. `split_about` breaks the About passage into one sentence per chunk, capping
+   the fund name at one or two mentions.
+4. `infer_section` now scores by *how many times* a fact is mentioned rather than
+   which pattern matches first. Under first-match-by-priority, 13 chunks over 550
+   characters were labelled `exit_load` from a single incidental mention, so the
+   minimum-SIP, AUM and benchmark chunks all advertised a fact they did not
+   contain. `aum` and `management` were added as sections in their own right.
+5. Recognised metrics are exempt from the size floors (§7's lesson applied again:
+   `Min. for SIP ₹100` is 17 characters and was being deleted outright).
+
+**Result.** 273 → 358 chunks, 99.3% of normalised aggregate text retained, all
+source markers present. Rank-1 contains the answer for **10 of 11** in-scope
+questions. `infer_section` is now trustworthy enough to filter on, which is what
+`architecture.md` §5.3's section pre-filter depends on - that filter is Phase 6
+work, but it is only sound because of fix 4.
+
+**Two bugs caught by measurement rather than by reading the code**, both worth
+recording because either would have been easy to ship:
+
+* Bounding the About section at end-of-file made the last one swallow the whole
+  rest of the page, and the sentence splitter then dropped every fragment below
+  `FACT_MIN_CHARS`. That deleted **30% of the corpus** - the return calculator,
+  the peer table, the manager biography - while the chunk count still looked
+  plausible. Caught by comparing aggregate character counts, not chunk counts.
+* Exempting metric blocks from the floor is only correct if the block is
+  *recognised*; exempting every short block silently reintroduces nav crumbs.
+
+**Still not solved.** Three general-knowledge probes that share a token with the
+corpus ("Who is the CEO of HDFC Bank?" 0.654) still clear τ = 0.35. An unfiltered
+query always has a best match somewhere, so similarity alone cannot police scope.
+Raising τ would reject the in-scope lock-in question at exactly 0.350. Left for
+the Phase 7 grounding guards; full evidence in `architecture.md` §5.3.

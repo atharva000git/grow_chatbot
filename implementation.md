@@ -537,11 +537,33 @@ benchmark, one faq — and confirm each is coherent and carries its scheme name.
 
 ### Acceptance criteria
 
-- [ ] 150–260 chunks total across the 10 source documents; no chunk under 80 chars. (The original 25–60 estimate assumed 5 documents; the corpus was extended to 10 in Phase 2, so the floor is now ~10 per document.)
-- [ ] Every chunk has non-empty `source_url`, `scheme`, `section`
-- [ ] No chunk contains a mid-sentence start after merging
-- [ ] Fees, exit_load and lock_in sections are populated for the schemes that have them
-- [ ] `notes/chunking.md` has the statistics and decision filled in
+- [x] 358 chunks total across the 10 source documents. **The 150–260 range and the "no chunk under 80 chars" clause are both superseded** — see the correction note below.
+- [x] Every chunk has non-empty `source_url`, `scheme`, `section`
+- [x] No chunk contains a mid-sentence start after merging
+- [x] Fees, exit_load and lock_in sections are populated for the schemes that have them
+- [x] `notes/chunking.md` has the statistics and decision filled in
+
+> **Correction (2026-09-27, after Phase 6 smoke testing).** Two Phase 3
+> acceptance clauses had to be rewritten, and the reasons are the same defect
+> twice: a size floor deleting real facts.
+>
+> *The 80-character floor is unsafe for atomic facts.* The ELSS lock-in is 73
+> characters and `Min. for SIP ₹100` is 17. Both were silently deleted by
+> `MIN_CHUNK_CHARS` / `FACT_MIN_CHARS` before being exempted. `MIN_CHUNK_CHARS`
+> now applies only to prose, never to a block introduced by a recognised metric
+> header or an allow-listed Groww metric label.
+>
+> *The corpus is 358 chunks, not 150–260.* Facts are now split to the metric, in
+> the factsheets and in the Groww pages alike, and the count follows the
+> granularity rather than the other way round. 201 → 273 (factsheets) → 358
+> (both). Measured floor of ~10 chunks per document was an estimate about prose
+> and did not survive learning that a fund page holds 10–20 separately citable
+> metrics. Content retention across the three versions is 99.3% of normalised
+> aggregate text; the shortfall is the stripped page banners plus sub-25-character
+> fragments.
+>
+> `MIN_CHUNK_CHARS` at `implementation.md` line 120 remains correct for prose and
+> is unchanged.
 
 ### Do not do in this phase
 
@@ -872,10 +894,32 @@ for q in qs:
 
 ### Acceptance criteria
 
-- [ ] Q1–Q4 return the correct scheme's chunk at rank 1
-- [ ] The out-of-scope query returns nothing above threshold
-- [ ] Similarities are in `[0, 1]` and rank-ordered
-- [ ] Latency per query < 150 ms (measure with `time.perf_counter`)
+- [x] Q1–Q4 return the correct scheme's chunk at rank 1
+- [x] The out-of-scope query returns nothing above threshold
+- [x] Similarities are in `[0, 1]` and rank-ordered
+- [x] Latency per query < 150 ms (measure with `time.perf_counter`)
+
+Measured on the built index, 2026-09-27:
+
+| criterion | result |
+|---|---|
+| Q1–Q4 at rank 1, containing the answer | 4/4 (0.495 / 0.482 / 0.701 / 0.471) |
+| out-of-scope "Who is the prime minister of India?" | 0.009, `is_sufficient` False |
+| similarities in `[0,1]`, rank-ordered | min 0.002, max 0.701, all 26 results descending |
+| latency (warm, 21 queries) | mean 12 ms, p95 15 ms, max 18 ms |
+| `IndexNotBuilt` on missing and on empty collection | both raise, both carry the fix command |
+
+Across a wider 11-question in-scope set, the rank-1 chunk contains the answer for
+**10/11**. The exception is "Who manages the HDFC Large Cap Fund?", which returns
+a fund-management chunk at 0.656 - a section added during Phase 6 to stop
+manager biographies polluting the benchmark bucket - but whose top hit belongs to
+a different scheme. The scheme pre-filter did not fire because the query says
+"the HDFC Large Cap Fund" without any distinctive token; the fix is a manager-name
+alias, not a threshold change.
+
+τ stayed at 0.35. The in-scope and out-of-scope ranges overlap, and the evidence
+for leaving it alone - including three general-knowledge probes that still clear
+0.35 - is recorded in `architecture.md` §5.3 rather than tuned away here.
 
 ### Threshold tuning note
 

@@ -1,7 +1,7 @@
 {
-  "built_at": "2026-09-27T08:19:08+00:00",
+  "built_at": "2026-09-27T08:41:41+00:00",
   "n_docs": 10,
-  "n_chunks": 273,
+  "n_chunks": 358,
   "n_sources": 6,
   "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
   "embedding_dim": 384,

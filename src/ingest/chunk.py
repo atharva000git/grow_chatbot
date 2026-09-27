@@ -29,9 +29,16 @@ SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n{2,}")
 SECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("lock_in", re.compile(r"lock[-\s]?in", re.I)),
     ("exit_load", re.compile(r"exit[-\s]?load", re.I)),
+    # Manager biographies are entity-heavy and mention "benchmark" while
+    # describing performance responsibility, which pulled them into the
+    # benchmark bucket and let a bio outrank the real index at 0.620 vs 0.424.
+    # They are frequent enough to need their own label, not just a higher
+    # priority, so a section filter can exclude them outright.
+    ("management", re.compile(r"view details|\beducation\b|\bexperience\b|also manages|\bmanages these schemes\b", re.I)),
     ("riskometer", re.compile(r"riskometer|risk\s+category|rated\s+\w+\s+risk|risk\s+profile", re.I)),
     ("fees", re.compile(r"expense\s+ratio|statutory\s+levies\s+on\s+expenses|additional\s+expense", re.I)),
     ("benchmark", re.compile(r"benchmark", re.I)),
+    ("aum", re.compile(r"fund\s+size|assets?\s+under\s+management|\bAUM\b", re.I)),
     ("statements", re.compile(r"capital\s+gains?\s+statement|tax\s+report|account\s+statement|download\s+statement", re.I)),
     ("sip", re.compile(r"\bSIP\b|systematic\s+investment|monthly\s+installment|\bmin\.?\s+for\s+sip", re.I)),
     ("nav", re.compile(r"\bNAV\b|net\s+asset\s+value", re.I)),
@@ -50,6 +57,10 @@ PAGE_MARKER = re.compile(r"\.{2,}\s*Contd on next page", re.I)
 # out of prose; a block introduced by a recognised metric header is not a crumb.
 FACT_MIN_CHARS = 25
 FACT_HEADER_MAX = 60
+# Groww renders each summary metric as a short label line over a short value
+# line, so these two ceilings are what distinguish a metric from prose.
+FIELD_LABEL_MAX = 45
+FIELD_VALUE_MAX = 30
 
 
 class ChunkingError(RuntimeError):
@@ -57,17 +68,23 @@ class ChunkingError(RuntimeError):
 
 
 def infer_section(text: str) -> str:
-    """Label a chunk by the highest-priority fact it carries.
+    """Label a chunk by the fact it *mostly* carries.
 
-    The whole chunk is scanned, not just its opening characters: the factsheet
-    packs expense ratio, benchmark, lock-in and exit load into one dense block,
-    and a 200-character window labelled that chunk `fees`, burying the ELSS
-    lock-in that the corpus was extended to capture.
+    Scored by how many times each fact is mentioned rather than by which
+    pattern comes first in SECTION_PATTERNS. First-match-by-priority was wrong
+    for the long descriptive chunks: a 583-character "About this fund" passage
+    that mentions exit load once was labelled `exit_load` outright, so the
+    minimum-SIP, AUM and benchmark chunks all inherited a label describing a
+    fact they did not contain. Counting makes one incidental mention lose to a
+    chunk that is genuinely about that fact, and ties still fall back to the
+    documented priority order.
     """
-    for name, pattern in SECTION_PATTERNS:
-        if pattern.search(text):
-            return name
-    return "overview"
+    best_name, best_count = "overview", 0
+    for priority, (name, pattern) in enumerate(SECTION_PATTERNS):
+        count = len(pattern.findall(text))
+        if count > best_count:
+            best_name, best_count = name, count
+    return best_name
 
 
 def _mid_line_starts(chunks: list[str]) -> int:
@@ -155,6 +172,184 @@ def is_fact_header(line: str) -> bool:
     return sum(1 for c in letters if c.isupper()) / len(letters) >= 0.85
 
 
+PAGE_HEADER = re.compile(
+    r"^## PDF page \d+ of \d+\n(?:For Product label[^\n]*\n)?"
+    r"\d+\s*\|\s*[A-Za-z]+ \d{4}\n[^\n]*\n?",
+    re.M,
+)
+
+
+def strip_page_headers(text: str) -> str:
+    """Drop the repeated factsheet page banner.
+
+    `## PDF page 64 of 144` / `64 | August 2026` / `HDFC ELSS - Tax Saver Fund`
+    is 293 characters of pure boilerplate that names the fund on every single
+    page. It is not merely useless: because the query also names the fund, that
+    banner outranked the 73-character lock-in fact for "What is the lock-in
+    period for HDFC ELSS Tax Saver Fund?" (0.694 vs 0.482) and pushed the
+    answer to rank 6. The banner appears on only 2 of the ELSS factsheet's
+    pages, so this is a narrow removal, not a filter on legitimate content.
+    """
+    return PAGE_HEADER.sub("", text)
+
+
+# Groww summary metrics, matched as a label prefix. An explicit allow-list rather
+# than a shape heuristic: "any short line over a short line containing a digit"
+# also matches the return-calculator and peer-comparison tables, which are grids
+# of repeated figures and must stay as grid chunks.
+GROWW_METRICS: tuple[str, ...] = (
+    "NAV:",
+    "Min. for SIP",
+    "Min. for 1st investment",
+    "Min. for 2nd investment",
+    "Min. for Additional",
+    "Fund size (AUM)",
+    "Expense ratio",
+    "Exit load",
+    "Stamp duty on investment",
+    "Lock-in period",
+)
+
+
+def metric_prefix(line: str) -> str | None:
+    """Return the Groww metric this line introduces, if any."""
+    text = line.strip().lstrip("#").strip()
+    for metric in GROWW_METRICS:
+        if text == metric or text.startswith(f"{metric} ") or text.startswith(f"{metric}:"):
+            return metric
+    return None
+
+
+def is_field_value(line: str) -> bool:
+    """True for a short value line such as `₹100` or `0.78%`."""
+    text = line.strip()
+    if not text or len(text) > FIELD_VALUE_MAX:
+        return False
+    return any(ch.isdigit() or ch in "₹%" for ch in text)
+
+
+def segment_fields(text: str) -> list[tuple[str, str]]:
+    """Split Groww pages into (metric, value) blocks and prose blocks.
+
+    The page opens with a run of bare metric pairs:
+
+        NAV: 25 Sep '26
+        ₹159.82
+        Min. for SIP
+        ₹100
+        Fund size (AUM)
+        ₹41,890.86 Cr
+        Expense ratio
+        0.78%
+
+    Left bundled into one 438-character chunk, four citable facts shared a single
+    embedding, so a query for one of them matched all four weakly. A metric also
+    absorbs following prose, so `## Exit load` plus "Exit load of 1% if redeemed
+    within 1 year" stays a single atomic fact rather than being split apart.
+    """
+    lines = text.split("\n")
+    blocks: list[tuple[str, str]] = []
+    prose: list[str] = []
+    index = 0
+
+    def flush() -> None:
+        joined = "\n".join(prose).strip()
+        if joined:
+            blocks.append(("", joined))
+        prose.clear()
+
+    while index < len(lines):
+        line = lines[index]
+        metric = metric_prefix(line)
+        if metric is None:
+            prose.append(line)
+            index += 1
+            continue
+        flush()
+        head = line.strip()
+        index += 1
+        body: list[str] = []
+        # A metric owns its own value line plus at most two wrapped value lines.
+        while index < len(lines) and len(body) < 3:
+            nxt = lines[index]
+            if metric_prefix(nxt) is not None or nxt.strip().startswith("##"):
+                break
+            if is_field_value(nxt) or (body and len(body[0]) <= FIELD_VALUE_MAX and is_field_value(body[0])):
+                body.append(nxt)
+                index += 1
+                continue
+            break
+        blocks.append((head, "\n".join(body).strip()))
+    flush()
+    return blocks
+
+
+ABOUT_HEADING = re.compile(r"^## About\b.*$", re.M)
+NEXT_HEADING = re.compile(r"^## ", re.M)
+SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z(])")
+
+
+def about_sentences(text: str) -> list[tuple[int, int, str]]:
+    """Sentence spans inside each "## About" passage, as (start, end, sentence).
+
+    The passage ends at the next `## ` heading, not at end of file. Bounding it
+    at EOF made the last About section swallow the entire remainder of the page,
+    and the sentence splitter then dropped every fragment below FACT_MIN_CHARS,
+    silently deleting 30% of the corpus - the return calculator, the peer table
+    and the manager biography.
+    """
+    out: list[tuple[int, int, str]] = []
+    for match in ABOUT_HEADING.finditer(text):
+        start = match.end()
+        nxt = NEXT_HEADING.search(text, start)
+        end = nxt.start() if nxt else len(text)
+        body = text[start:end].strip()
+        offset = start + (len(text[start:end]) - len(text[start:end].lstrip()))
+        for sentence in SENTENCE_SPLIT.split(body):
+            cleaned = " ".join(sentence.split())
+            if len(cleaned) >= FACT_MIN_CHARS:
+                found = text.find(cleaned[:60], offset)
+                if found != -1:
+                    out.append((found, found + len(cleaned), cleaned))
+                    offset = found + len(cleaned)
+    return out
+
+
+def split_about(text: str) -> list[str]:
+    """Break the "About this fund" passage into one sentence per chunk.
+
+    This passage repeats the fund's full name in nearly every sentence:
+
+        HDFC Small Cap Fund Direct Growth is a Equity Mutual Fund Scheme
+        launched by HDFC Mutual Fund. This scheme was made available to
+        investors on 10 Dec 1999. Dhruv Muchhal is the Current Fund Manager of
+        HDFC Small Cap Fund Direct Growth fund.
+
+    Bundled, the name appears five times in 583 characters, and cosine similarity
+    scores that repetition against any query naming the fund. It outranked the
+    real minimum-SIP answer (0.736 vs 0.563) and the real expense-ratio answer
+    (0.765 vs 0.518). One sentence per chunk caps the name at one or two
+    mentions, so the sentence that actually carries the fact competes on the
+    fact rather than on the fund's name. The heading is dropped because it is
+    itself a fifth repetition; scheme and category stay in the chunk metadata.
+    """
+    return [sentence for _, _, sentence in about_sentences(text)]
+
+
+def _without_about(text: str) -> str:
+    """`text` with every About sentence removed, so the rest is chunked once."""
+    spans = about_sentences(text)
+    if not spans:
+        return text
+    out: list[str] = []
+    cursor = 0
+    for start, end, _ in spans:
+        out.append(text[cursor:start])
+        cursor = end
+    out.append(text[cursor:])
+    return "".join(out)
+
+
 def segment_facts(text: str) -> list[tuple[str, str]]:
     """Split a factsheet into (header, body) blocks at its metric headers.
 
@@ -237,6 +432,34 @@ def _normalize(chunk: str) -> str:
     return " ".join(PAGE_MARKER.sub(" ", chunk).split())
 
 
+def chunk_html(text: str, strategy: str) -> list[str]:
+    """Groww pages: atomic metric pairs, sentence-split About, prose as-is."""
+    out: list[str] = []
+    about = split_about(text)
+    body = _without_about(text)
+
+    for header, block in segment_fields(body):
+        joined = "\n".join(part for part in (header, block) if part.strip()).strip()
+        if not joined:
+            continue
+        # A recognised metric is exempt from FACT_MIN_CHARS. "Min. for SIP ₹100"
+        # is 17 characters and "NAV: 25 Sep '26 ₹1,189.08" is 22, so the floor
+        # deleted the atomic chunks it was meant to protect - the same mistake
+        # that buried the 73-character ELSS lock-in. The floor exists to strip
+        # nav crumbs, and a metric introduced by an allow-listed label is not a
+        # crumb; prose blocks still go through it.
+        floor = 1 if metric_prefix(header) else FACT_MIN_CHARS
+        if header and len(joined) <= settings.CHUNK_SIZE and len(joined) >= floor:
+            out.append(joined)
+        elif len(joined) <= settings.CHUNK_SIZE:
+            out.extend(c for c in chunk_recursive(joined) if len(c.strip()) >= settings.MIN_CHUNK_CHARS)
+        elif strategy == "semantic":
+            out.extend(chunk_semantic(joined))
+        else:
+            out.extend(chunk_recursive(joined))
+    return out + about
+
+
 def chunk_document(doc: SourceDoc, strategy: str | None = None) -> list[Chunk]:
     text = Path(doc.clean_path).read_text(encoding="utf-8")
     chosen = (strategy or settings.CHUNK_STRATEGY).lower()
@@ -244,14 +467,14 @@ def chunk_document(doc: SourceDoc, strategy: str | None = None) -> list[Chunk]:
         raise ChunkingError(f"unknown CHUNK_STRATEGY {chosen!r}; use 'recursive' or 'semantic'")
 
     if doc.source_type == "pdf":
-        # Factsheet only: split metrics apart before the strategy runs. Groww
-        # pages already use "## " headings and their all-caps lines are bond
-        # tickers in holdings tables, so segmenting them would fragment prose.
-        raw = chunk_facts(text, chosen)
-    elif chosen == "semantic":
-        raw = chunk_semantic(text)
+        # Factsheet: strip the repeated page banner, then split metrics apart at
+        # their all-caps headers before the strategy runs.
+        raw = chunk_facts(strip_page_headers(text), chosen)
     else:
-        raw = chunk_recursive(text)
+        # Groww: same intent, different markers - label/value pairs instead of
+        # all-caps headers. Its all-caps lines are bond tickers inside holdings
+        # tables, so the all-caps rule would fragment prose here.
+        raw = chunk_html(text, chosen)
     merged, merges, remaining = _merge_mid_line_starts(raw)
     log.info(
         "%s (%s): %d chunks; %d mid-line start(s) merged, %d kept because merging "

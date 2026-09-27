@@ -281,8 +281,39 @@ Refusal text is fixed, ≤2 sentences, plus one **educational link** chosen from
 |---|---|---|
 | `top_k` | 4 | Enough context for a 3-sentence answer without diluting |
 | `distance_metric` | cosine | Consistent with MiniLM training |
-| `threshold τ` | 0.35 similarity (tuned on the §9 validation set) | Below this the corpus does not cover the question |
+| `threshold τ` | 0.35 similarity (unchanged; see below) | Below this the corpus does not cover the question |
 | scheme pre-filter | on when the query names a scheme | Boosts precision for single-scheme questions |
+| section pre-filter | on when the query names a metric | Excludes entity-matching decoys; see below |
+
+**Why the section pre-filter exists.** Filtering on scheme alone was not enough,
+because every chunk on a scheme's page repeats that scheme's name. A generic
+description ("HDFC Large Cap Fund Direct Growth is a Equity Mutual Fund Scheme
+launched by HDFC Mutual Fund.") scored **0.684** against "What is the exit load
+of HDFC Large Cap Fund?" and buried the chunk that actually states the exit load.
+Chunk-level `section` labels, made reliable in Phase 3, now constrain the search
+the same way scheme labels do. Filters are tried narrowest-first and relaxed one
+clause at a time, so an over-eager filter degrades to a wider search and never
+into a false "no answer".
+
+**Threshold evidence.** τ is **unchanged at 0.35**, and the ranges do *not*
+separate cleanly:
+
+| | min | mean | max |
+|---|---|---|---|
+| 11 in-scope questions | 0.350 | 0.564 | 0.843 |
+| 12 out-of-scope questions | 0.009 | 0.285 | 0.654 |
+
+The spec's out-of-scope probe, "Who is the prime minister of India?", scores
+**0.009** and is correctly rejected. But three general-knowledge probes sharing a
+token with the corpus still clear 0.35 — "Who is the CEO of HDFC Bank?" 0.654,
+"Recommend a restaurant in Delhi" 0.436, "What is the GDP of India?" 0.422. An
+unfiltered query always has a best match in *some* corpus, so similarity alone
+cannot police scope. Raising τ to exclude those would reject the in-scope
+"lock-in period" question at exactly 0.350, and the spec explicitly forbids
+tuning τ to make results look good. τ is therefore left at 0.35, and the residual
+false positives are left to the Phase 7 grounding and citation guards, which can
+check whether the retrieved context actually answers the question. Raising τ
+later requires re-measuring this table.
 
 Chunk text sent to the LLM is prefixed with an index (`[1]`, `[2]`, …) and each context block carries its `source_url`, so the model can only *point at* a real URL.
 
