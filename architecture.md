@@ -227,6 +227,7 @@ user query (raw text)
 ┌──────────────────────────────────────────┐
 │ S4. GENERATION                          │  generation/llm.py
 │    temperature 0, max_tokens ~200        │
+│    POST {chat/completions} via requests │
 └──────────────────┬───────────────────────┘
                    ▼
 ┌──────────────────────────────────────────┐
@@ -267,7 +268,12 @@ class ChatResponse:
 
 ### 5.2 Guard details
 
-**PII guard (`S0`).** Regex families: PAN (`[A-Z]{5}[0-9]{4}[A-Z]`), Aadhaar (12-digit with optional spaces), account number (8–18 digits), OTP (4–6 digit codes near "otp"), email, phone (+91 / 10-digit). On hit: fixed response, input cleared, **nothing written to the query log**. The log records the intent and a redacted placeholder only.
+**PII guard (`S0`).** Regex families: PAN (`[a-z]{5}[0-9]{4}[a-z]`, case-insensitive), Aadhaar (12-digit with optional spaces), account number (8–18 digits), OTP (4–6 digit codes near "otp"), email, phone (+91 / 10-digit). On hit: fixed response, input cleared, **nothing written to the query log**. The log records the intent and a redacted placeholder only.
+
+Two of these patterns were wrong until Phase 11 wrote the tests that would have caught them, and both are now pinned:
+
+* The PAN pattern was `[A-Z]{5}[0-9]{4}[A-Z]`, so `abcde1234f` was not detected. Lower-case PANs are a real thing — an ARN, a Form 26A acknowledgement or a WhatsApp forward all routinely renders it that way.
+* The country-code strip for phone numbers used a lookbehind. `\b` cannot sit between `+91` and the first digit — there is no word boundary inside `+919876543210` — so a number written in the common international form escaped detection, while the same lookbehind correctly spared a 10-digit suffix of a 12-digit account number. A **lookahead** on `(?:\+?91[- ]?)` fixes the first without reintroducing the second, and the negative test for account numbers is what proves it.
 
 **Advice guard (`S1`).** Two signals, either sufficient:
 - Regex/keyword families: `should i (buy|sell|invest)`, `which (fund|scheme) is best`, `good time to`, `how much should i invest`, `build me a portfolio`, `is (this|it) right for me`, `highest returns`.
@@ -317,8 +323,25 @@ later requires re-measuring this table.
 
 Chunk text sent to the LLM is prefixed with an index (`[1]`, `[2]`, …) and each context block carries its `source_url`, so the model can only *point at* a real URL.
 
-### 5.4 Prompt contract (FR-6)
+### 5.3a Provider transport (deviation, recorded in Phase 8)
 
+`S4` posts to `{LLM_BASE_URL or https://api.openai.com/v1}/chat/completions`
+directly, with `requests`, and parses `choices[0].message.content` itself. It
+issues **one** HTTP call and **one** `choices[0]` read.
+
+The natural alternative is `langchain-openai`'s `ChatOpenAI`, but
+`langchain-core==0.2.2` is pinned in `requirements.txt` while the matching
+`langchain-openai` version is not installable in this environment. Adopting the
+wrapper for a single endpoint call would have added a version constraint and a
+second parsing layer for no gain, so `langchain_core` is used for the ported
+message types and the HTTP call is explicit. Swapping in `ChatOpenAI` later is a
+change to `src/generation/llm.py` alone — no other module imports it.
+
+A missing key raises `LLMUnavailable` rather than degrading to an extractive
+answer, so the failure is visible in the UI and the eval harness reports
+`ERROR:NO_KEY` instead of a passing score.
+
+### 5.4 Prompt contract (FR-6)
 System rules, verbatim in `generation/prompt.py`:
 
 ```
@@ -416,6 +439,8 @@ LLM_TEMPERATURE   = 0.0
 LLM_MAX_TOKENS    = 220
 MAX_ANSWER_SENTENCES = 3
 LLM_API_KEY       = os.getenv("LLM_API_KEY")
+LLM_MODEL         = os.getenv("LLM_MODEL", "")       # "" -> gpt-4o-mini in llm.py
+LLM_BASE_URL      = os.getenv("LLM_BASE_URL", "")     # "" -> https://api.openai.com/v1
 LOG_QUERIES       = False            # NFR-5: off by default
 ```
 

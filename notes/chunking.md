@@ -256,10 +256,12 @@ facts. Entity overlap, not topic overlap, was deciding the ranking.
    `Min. for SIP ₹100` is 17 characters and was being deleted outright).
 
 **Result.** 273 → 358 chunks, 99.3% of normalised aggregate text retained, all
-source markers present. Rank-1 contains the answer for **10 of 11** in-scope
-questions. `infer_section` is now trustworthy enough to filter on, which is what
-`architecture.md` §5.3's section pre-filter depends on - that filter is Phase 6
-work, but it is only sound because of fix 4.
+source markers present. (Phase 11 removed ten label-only chunks from that 358;
+the corpus is now **349**. See §9.) Rank-1 contains the answer for **10 of 11**
+in-scope questions. `infer_section` became trustworthy enough to filter on, which
+is what `architecture.md` §5.3's section pre-filter depends on - that filter is
+Phase 6 work, and it is sound enough in practice but not exact; §9 records the
+case that still mislabels a chunk.
 
 **Two bugs caught by measurement rather than by reading the code**, both worth
 recording because either would have been easy to ship:
@@ -277,3 +279,52 @@ corpus ("Who is the CEO of HDFC Bank?" 0.654) still clear τ = 0.35. An unfilter
 query always has a best match somewhere, so similarity alone cannot police scope.
 Raising τ would reject the in-scope lock-in question at exactly 0.350. Left for
 the Phase 7 grounding guards; full evidence in `architecture.md` §5.3.
+
+---
+
+## 9. Addendum — label-only chunks removed (added in Phase 11)
+
+Phase 11's test suite asserted the invariants the Phase 3 spec asked for, and two
+of them failed against the Phase 6 corpus: **ten chunks contained no fact at
+all.** 358 → 349.
+
+Five were `## Exit load` and five were `## Minimum investments`, both bare
+headings, the shortest 12 characters. Each one embedded to a near-perfect match
+for the query it was named after while answering nothing — precisely the
+behaviour a retrieval demo cannot survive being shown.
+
+**Cause 1 — the value was stolen by the label detector.** Under `## Exit load`
+sat `Exit load of 1% if redeemed within 1 year`, 41 characters. `is_field_value`
+requires `len <= FIELD_VALUE_MAX = 30`, so it was not accepted as a value, and
+`metric_prefix` then matched the sentence itself, because its `startswith` test
+also fires on prose that merely opens with the metric's words. The heading was
+left with no body. `metric_prefix` now requires a *bare* metric line to be at
+most `METRIC_LABEL_MAX = 30` characters, while a `##`-prefixed heading is always
+honoured. Every genuine bare label in the corpus is 23 characters or fewer and
+the value sentence is 41, so the two separate cleanly. A metric heading with an
+empty body also absorbs one following plain line, which is what
+`segment_fields`' docstring always claimed it did.
+
+**Cause 2 — the prose floor was missing from one branch.** `chunk_html` applies
+`MIN_CHUNK_CHARS` when a block is under `CHUNK_SIZE`, and skipped it on the
+oversized branch. Since an oversized block is split on `##` boundaries, the
+omission let a bare heading through as its own chunk.
+
+**Retrieval was measured, not assumed.** The exit-load query ranked
+0.495 / 0.432 / 0.423 / 0.352 before the fix and 0.495 / 0.432 / 0.423 / 0.349
+after — identical bar the one correct chunk. So this was a hygiene and
+correctness fix, not a retrieval improvement, and the ten chunks were not
+carrying queries. Phase 6's benchmarks were re-run after the change: 4/4
+rank-1 correct, prime-minister probe still 0.009.
+
+**A claim in §8 needs qualifying.** §8 said `infer_section` had become
+"trustworthy enough to filter on" because it now scores by mention count. It is
+more accurate than that, but not sound: a chunk that runs to the *next* section's
+heading picks up one incidental mention, and
+`## Returns and rankings … +15.4% … ## Exit load, stamp duty and tax` is
+therefore labelled `exit_load` while containing no exit-load content. So an
+exit-load query retrieves the Groww **returns table** as its top hit (0.535), and
+only the output guard stops those numbers being quoted. The corpus does contain
+performance data; "no performance data by answer" is enforced in
+`src/generation/validate.py`, not by the chunker. `tests/test_validate.py` now
+feeds the real chunk through the validator so this cannot regress quietly.
