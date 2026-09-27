@@ -464,13 +464,14 @@ def save_chunks(chunks: list[Chunk], path: Path) -> None
 
 Logic:
 
-1. **Section inference.** Map lowercased text to one of `fees`, `exit_load`, `lock_in`, `riskometer`, `benchmark`, `sip`, `nav`, `faq`, `statements`, `overview`, using keyword sets. A chunk inherits the section of its first 200 characters; default `overview`.
+1. **Section inference.** Map lowercased text to one of `fees`, `exit_load`, `lock_in`, `riskometer`, `benchmark`, `sip`, `nav`, `faq`, `statements`, `overview`, using keyword sets, tested in that priority order. Default `overview`. Scan the **whole** chunk, not its first 200 characters: the factsheet packs expense ratio, benchmark, lock-in and exit load into one dense block, and a 200-character window labelled the ELSS chunk `fees` and buried the lock-in fact the corpus was extended to capture. (Revised after the first run; see `notes/chunking.md`.)
 2. **Recursive strategy.** `RecursiveCharacterTextSplitter` with `chunk_size=800`, `chunk_overlap=120`, and separators in this exact priority order: `["\n## ", "\n\n", "\n", ". ", " "]`. The `\n## ` first is what preserves section boundaries.
-3. **Semantic strategy.** `SemanticChunker` from `langchain_text_splitters` with a buffer size of 1 and the shared MiniLM embedder, breakpoint threshold at percentile 85. Expose it but default it off (`settings.CHUNK_STRATEGY = "recursive"`).
+3. **Semantic strategy.** Sentence-embedding breakpoint detection at percentile 85, backed by the shared MiniLM embedder: split into sentences, embed them in one batch, take the cosine distance between consecutive sentences, and break where the distance exceeds the 85th-percentile threshold; re-split any group longer than the ceiling with the recursive splitter. It is implemented directly on `sentence-transformers` rather than `langchain_experimental.SemanticChunker`, because `langchain_text_splitters==0.2.0` does not export `SemanticChunker`, no `langchain-experimental` 0.2.x release exists to match `langchain==0.2.2`, and installing 0.3.1 forces `langchain` 0.3.30 / `langchain-core` 0.3.86 / `numpy` 2.5.3, breaking every pin. Expose it but default it off (`settings.CHUNK_STRATEGY = "recursive"`).
 4. **Never split a table row or FAQ pair.** Post-process: if a chunk starts mid-line (does not begin at a sentence or heading boundary) merge it into the previous chunk when the combined size stays under `CHUNK_SIZE * 1.3`; otherwise keep and flag. Log how many merges happened.
 5. **Filter.** Drop chunks with `len(text.strip()) < settings.MIN_CHUNK_CHARS` — this is what removes nav crumbs.
-6. **Metadata.** `chunk_id = f"{source_id}::c{index}"`, carrying `source_url`, `scheme`, `category`, `section`, `chunk_index`.
-7. **Persist.** `data/chunks/chunks.jsonl`, one JSON object per line.
+6. **Metadata.** `chunk_id = f"{source_id}::c{index}"`, carrying `source_url`, `scheme`, `category`, `section`, `chunk_index`, and `fetched_at` (carried forward from `SourceDoc`; Phase 5 must write it into Chroma metadata).
+7. **Normalise whitespace per chunk.** The August 2026 factsheet is laid out in narrow columns, so pypdf hard-wraps a single fact across several physical lines (`LOCK-IN PERIOD\n3 years from the date of allotment of the\nrespective Units`). Collapse each chunk's whitespace to single spaces and drop `....Contd on next page` page markers, so a label and its value form one contiguous span for the encoder and the generator. This runs **after** step 4, which needs the real line structure to detect a mid-sentence start.
+8. **Persist.** `data/chunks/chunks.jsonl`, one JSON object per line.
 
 `notes/chunking.md` must record: the observed structure of the real corpus, the two strategies compared, the parameters chosen, the merge count, and the decision with a one-paragraph justification. This is a graded deliverable (`FR-2` says the strategy is chosen from the data, so the reasoning has to be written down).
 
@@ -536,7 +537,7 @@ benchmark, one faq — and confirm each is coherent and carries its scheme name.
 
 ### Acceptance criteria
 
-- [ ] 25–60 chunks total (roughly 5–12 per scheme); no chunk under 80 chars
+- [ ] 150–260 chunks total across the 10 source documents; no chunk under 80 chars. (The original 25–60 estimate assumed 5 documents; the corpus was extended to 10 in Phase 2, so the floor is now ~10 per document.)
 - [ ] Every chunk has non-empty `source_url`, `scheme`, `section`
 - [ ] No chunk contains a mid-sentence start after merging
 - [ ] Fees, exit_load and lock_in sections are populated for the schemes that have them
