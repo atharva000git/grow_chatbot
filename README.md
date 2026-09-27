@@ -87,7 +87,7 @@ a real citation, and attaches the freshness line.
 | Layer | Module | Notes |
 |---|---|---|
 | Ingest | `src/ingest/` | fetch → clean → chunk → embed → index |
-| Retrieval | `src/retrieval/search.py` | cosine over Chroma, top-k, scheme + section pre-filter |
+| Retrieval | `src/retrieval/search.py` | exact cosine over a numpy matrix, top-k, scheme + section pre-filter |
 | Guards | `src/guards/` | PII (outermost), advice |
 | Generation | `src/generation/` | prompt contract, provider client, post-validation |
 | Orchestrator | `src/pipeline.py` | the stage list above |
@@ -136,7 +136,7 @@ provider; `langchain-openai` is deliberately not a dependency.
 python -m src.ingest.run_all --rebuild
 ```
 
-`--rebuild` wipes the Chroma collection first. Use it after any change to
+`--rebuild` deletes the existing index first. Use it after any change to
 `config/sources.csv` or the chunking code — otherwise the old vectors survive and
 results look stale. The run prints a stage table and writes `data/manifest.json`
 with the chunk count, embedding model, dimension, chunk strategy and a corpus
@@ -147,14 +147,14 @@ hash, so a reviewer can tell whether the index matches the source files.
 present, so the command above rebuilds all 349 vectors offline in about 13
 seconds. Only the *first* embedding call on a new machine reaches HuggingFace, to
 download `all-MiniLM-L6-v2` (~90 MB) into the local model cache. The 11 MB source
-PDF and the 40 MB Chroma index are gitignored and are not needed to rebuild
+PDF and the generated `index/` (0.8 MB) are gitignored and are not needed to rebuild
 either.
 
 ## 6. Tests and evaluation
 
 ```bash
 pip install -r eval/requirements.txt
-pytest tests -q                    # 184 tests, keyless, no network, ~3.5 s
+pytest tests -q                    # 189 tests, keyless, no network, ~3.5 s
 python eval/run_eval.py            # writes samples/sample_qa.md
 ```
 

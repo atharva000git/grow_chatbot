@@ -8,8 +8,7 @@ load_dotenv()
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
-CHROMA_DIR = "chroma"
-COLLECTION_NAME = "hdfc_faqs"
+INDEX_DIR = "index"
 CHUNK_STRATEGY = "recursive"
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 120
@@ -24,8 +23,10 @@ MIN_DOC_CHARS = 1000
 # Widening the window therefore cannot turn an out-of-scope question into an
 # answerable one - the top hit decides that, and it does not move.
 #
-# Safe: `hnsw:search_ef` is pinned to 256 in `ingest/store.py`, well clear of 10.
-# At the default 10 it would sit exactly at k and start dropping recall.
+# Safe: retrieval is now an exact scan of a dense numpy matrix rather than
+# Chroma's approximate HNSW, so there is no candidate list to truncate and no
+# `hnsw:search_ef` to keep above k. The old default of 10 silently dropped
+# strong neighbours; see notes/chunking.md.
 #
 # Not free: deeper context reaches chunks that were previously invisible,
 # including the Groww returns tables. More context is not automatically better -

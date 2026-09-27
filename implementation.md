@@ -1932,3 +1932,64 @@ ambiguous, and the product's bias is to refuse.
 against a `gsk_` key. Set to `https://api.groq.com/openai/v1`. The pasted key also
 carried a stray `- ` prefix, which dotenv preserves — the value was literally
 `- gsk_...`. Both fixed. `.env` remains gitignored.
+
+## Phase 7 — Replace Chroma with an exact numpy index (Render 512 MiB)
+
+**Trigger.** The service would not deploy. Render's free tier caps a service at
+512 MiB and the build succeeded but the process died with
+`Out of memory (used over 512Mi)` before Streamlit came up. This is a memory
+ceiling, not a misconfiguration: no amount of restarting or region-picking
+addresses it.
+
+**Measured, not guessed.** Sampling RSS every 20 ms along the real request path
+(import Streamlit → import torch → load MiniLM → embed query → generate) and
+cross-checking with `ru_maxrss`:
+
+| | peak |
+| --- | --- |
+| with Chroma, Streamlit + 1 query | 615–644 MB |
+| with Chroma, ingest | 532 MB |
+| numpy index, Streamlit + 1 query | 550 MB sampled / 567 MB `ru_maxrss` |
+| numpy index, ingest | 489 MB |
+
+Breakdown of the remaining 474 MB steady state: Python 14, numpy +19,
+Streamlit +17, **torch +155**, **model construction +268**, query +0.
+
+**What changed.** `src/ingest/store.py` persists a L2-normalised float32 matrix
+to `index/vectors.npy` with row metadata in `index/chunks.jsonl`; `src/retrieval/
+search.py` scores with one matrix-vector product. `requirements.txt` drops
+`chromadb` and three unused `langchain-*` packages. 349 vectors, ids verified
+row-aligned, `corpus_hash` unchanged at `21d8dabde5c4a916`.
+
+**What it bought.** ~65 MB (Chroma's headline 84 MB was partly numpy, which is
+still needed), a much smaller install, and — more valuable — **exact** search.
+Chroma's HNSW was approximate and had already silently dropped the single best
+match for a documented query; that failure mode is now structurally impossible,
+pinned by `test_search_is_exhaustive`.
+
+**What it did not buy.** Enough. 550 MB is still over 512 MiB, so the deployment
+is still blocked. The cost is entirely the embedding stack, and three attempts
+failed to move it: `low_cpu_mem_usage=True` (469 MB, unchanged, and
+bit-identical vectors), `torch.set_num_threads(1)` (no change), and loading the
+model before Streamlit (~9 MB, real but not decisive). The remaining fix is
+removing torch from the query-time encoder via ONNX Runtime, which is a
+dependency and index-rebuild change, so it is a decision rather than a detail.
+
+**One test caught one real bug in the new code.** Dedupe by `chunk_id` was
+implemented by fetching `top_k - len(collected)` per relaxation step and then
+discarding duplicates, which cannot backfill; two overlapping filters left the
+window at 8 of 10. Each step now skips already-contributed ids while scanning
+deeper. `test_window_fills_beyond_a_narrow_filter` fails without it.
+
+**Retrieval consequence, recorded honestly.** The prime-minister probe moved
+from 0.009 to 0.368 — against a debt-maturity table with zero shared content
+words. The old 0.009 was approximate search returning a poor candidate set, not
+the embedding model judging relevance. The gate now passes that query and the
+model's own `INSUFFICIENT_CONTEXT` produces the refusal, so live behaviour is
+unchanged (11/11, grounding 6/6) but the guarantee is now the model's rather
+than the retriever's. See `notes/retrieval.md`.
+
+**Tests 163 → 189.** `tests/test_retrieval.py` was rewritten against the numpy
+API: `StubCollection` and the `hnsw:search_ef` guard are gone, and the scoring
+trick (stub query = `e_0`, row = `[s, sqrt(1-s²), 0…]`) means the tests run the
+real scoring code and still need neither `index/` nor the model.

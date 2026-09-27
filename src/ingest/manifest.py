@@ -46,7 +46,7 @@ def build_manifest(docs: list[SourceDoc], chunks: list[Chunk]) -> dict:
         "chunk_overlap": settings.CHUNK_OVERLAP,
         "top_k": settings.TOP_K,
         "similarity_threshold": settings.SIMILARITY_THRESHOLD,
-        "collection_name": settings.COLLECTION_NAME,
+        "vector_store": "numpy",
         "corpus_hash": corpus_hash(docs),
         "sources": sources,
     }

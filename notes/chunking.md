@@ -208,6 +208,14 @@ all 273 records put it at rank 1 with 0.555. Pinning `hnsw:search_ef` and
 this, Phase 6 would have looked like it was working while missing the best
 match on roughly half of these queries.
 
+**Closed, permanently, by removing Chroma.** The parameter is no longer a
+tuning knob that can be forgotten or reverted: `src/ingest/store.py` now
+persists a dense `numpy` matrix and `src/retrieval/search.py` scores every row
+with one matrix-vector product. There is no ANN structure, so the entire
+class of "the best match was in the index but the candidate list missed it"
+defect cannot recur. `tests/test_retrieval.py::test_search_is_exhaustive`
+pins it with 300 decoys and a single distant winner.
+
 ## 8. Addendum — Groww granularity and honest section labels (added in Phase 6)
 
 Querying the Phase 5 index with the spec's own questions exposed a second

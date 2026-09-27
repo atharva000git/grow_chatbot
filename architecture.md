@@ -50,7 +50,7 @@
            │        │        │        │
            ▼        ▼        ▼        ▼
     ┌──────────┐ ┌────────┐ ┌────────┐ ┌──────────┐
-    │  Guards  │ │ChromaDB│ │  LLM   │ │ Logger   │
+    │  Guards  │ │ numpy  │ │  LLM   │ │ Logger   │
     │ PII      │ │ vector │ │ API    │ │ redacted │
     │ Advice   │ │ store  │ │(temp 0)│ │ queries  │
     └──────────┘ └────────┘ └────────┘ └──────────┘
@@ -72,7 +72,7 @@
 | `FR-1` | 2. Loading / Cleaning | `src/ingest/load.py` | `data/raw/*.html`, `data/clean/*.txt` |
 | `FR-2` | 3. Chunking | `src/ingest/chunk.py` | `data/chunks/*.jsonl` |
 | `FR-3` | 4. Embedding | `src/ingest/embed.py` | `data/embeddings/*.npy` |
-| `FR-4` | 5. Vector store | `src/ingest/store.py` | `chroma/` |
+| `FR-4` | 5. Vector store | `src/ingest/store.py` | `index/vectors.npy` + `index/chunks.jsonl` |
 | `FR-5` | 6. Retrieval | `src/retrieval/search.py` | `RetrievedChunk[]` |
 | `FR-8` | 7. PII guard | `src/guards/pii.py` | `PIIVerdict` |
 | `FR-7` | 7. Advice guard | `src/guards/advice.py` | `AdviceVerdict` |
@@ -119,8 +119,8 @@ sources.csv
                             ▼
 ┌────────────────────────────────────────────────────────────┐
 │ STAGE 5 — VECTOR STORE                   src/ingest/store.py│
-│  ChromaDB PersistentClient(dir="chroma")                  │
-│  collection "hdfc_faqs", cosine space                      │
+│  numpy float32 matrix, L2-normalised rows, cosine by dot   │
+│  index/vectors.npy + index/chunks.jsonl (row-aligned)       │
 │  ids: "<scheme_slug>::c<idx>"                              │
 │  metadatas: source_url, scheme, category, section,        │
 │             chunk_index, fetched_at, content_hash         │
@@ -136,7 +136,7 @@ sources.csv
 - **Idempotent.** Re-running produces the same chunk ids and (given the same model) the same vectors.
 - **Fail loud, fail early.** A source that yields too little text aborts the build with a named error — a silently empty page would poison retrieval.
 - **Corpus hash.** `manifest.corpus_hash` = hash of the sorted `content_hash` values. If it changes, the UI shows a "sources updated" note.
-- **No live crawl at query time.** Demo depends only on `chroma/` and `data/`.
+- **No live crawl at query time.** Demo depends only on `index/` and `data/`.
 
 ### 4.2 Document model
 
@@ -211,7 +211,7 @@ user query (raw text)
 ┌──────────────────────────────────────────┐
 │ S2. RETRIEVAL                           │  retrieval/search.py
 │    embed(sanitized_text) with same model │
-│    Chroma similarity_search(k=4)         │
+│    exact matrix @ query vector (k=10)    │
 │    + scheme metadata pre-filter (opt.)  │
 │    + similarity threshold τ              │
 │    ALL < τ  → INSUFFICIENT_CONTEXT       │  (short-circuits S3–S4)
@@ -390,7 +390,7 @@ Response parsing treats `INSUFFICIENT_CONTEXT` as a first-class return, not an e
 │   │   ├── load.py                 # FR-1 fetch + clean + sanity gate
 │   │   ├── chunk.py                # FR-2 recursive | semantic
 │   │   ├── embed.py                # FR-3 MiniLM embedder (cached)
-│   │   ├── store.py                # FR-4 Chroma build
+│   │   ├── store.py                # FR-4 numpy index build
 │   │   ├── manifest.py             # build metadata + corpus hash
 │   │   └── run_all.py              # stage runner CLI
 │   ├── retrieval/
@@ -406,7 +406,7 @@ Response parsing treats `INSUFFICIENT_CONTEXT` as a first-class return, not an e
 │   └── logging_utils.py            # redacted query log
 ├── data/
 │   ├── raw/  clean/  chunks/  embeddings/  manifest.json
-├── chroma/                          # FR-4 persisted index
+├── index/                           # FR-4 persisted index (gitignored)
 ├── notes/chunking.md                # FR-2 strategy study
 ├── samples/sample_qa.md             # FR-10 5–10 Q&A with links
 ├── eval/run_eval.py                 # validation set runner
@@ -426,8 +426,8 @@ Response parsing treats `INSUFFICIENT_CONTEXT` as a first-class return, not an e
 ```python
 EMBEDDING_MODEL   = "sentence-transformers/all-MiniLM-L6-v2"
 EMBEDDING_DIM     = 384
-CHROMA_DIR        = "chroma"
-COLLECTION_NAME   = "hdfc_faqs"
+INDEX_DIR         = "index"
+TOP_K             = 10
 CHUNK_STRATEGY    = "recursive"      # or "semantic"
 CHUNK_SIZE        = 800
 CHUNK_OVERLAP     = 120
@@ -467,7 +467,7 @@ hdfc-fs-balanced-advantage,HDFC Balanced Advantage Fund - Direct - Growth,Balanc
 ## 8. Sequence — One Factual Query
 
 ```
-Streamlit        pipeline        pii      advice     search     chroma      llm      validate
+Streamlit        pipeline        pii      advice     search      numpy       llm      validate
     │ query         │             │          │          │         │          │          │
     ├──────────────►│             │          │          │         │          │          │
     │               ├────────────►│          │          │         │          │          │
@@ -495,7 +495,7 @@ Streamlit        pipeline        pii      advice     search     chroma      llm 
 | Failure | Detection | Behaviour |
 |---|---|---|
 | Source page JS-rendered / blocked | clean text < `MIN_DOC_CHARS` | `IngestError` naming the URL; fall back to official HDFC factsheet PDF (public) or manual text export |
-| Corpus missing at query time | `chroma/` absent | UI shows "index not built — run `python -m src.ingest.run_all`" instead of a traceback |
+| Corpus missing at query time | `index/` absent | UI shows "index not built — run `python -m src.ingest.run_all`" instead of a traceback |
 | Embedding model unavailable offline | load failure at startup | Use the cached `data/embeddings/*.npy` for retrieval; LLM call still required |
 | LLM API down / no key | client exception | Hard stop with a clear banner: "generation unavailable, cannot answer facts-only" — **never** fall back to an ungrounded answer |
 | All chunks below τ | `max(similarity) < τ` | `INSUFFICIENT_CONTEXT`: "I couldn't find that in the HDFC pages I have. Sources: …" |
@@ -513,7 +513,7 @@ Streamlit        pipeline        pii      advice     search     chroma      llm 
 |---|---|
 | Ingestion build (5 docs) | < 60 s on CPU, one-off |
 | Query embedding (MiniLM, CPU) | ~30–80 ms |
-| Chroma top-k (k=4) | < 20 ms |
+| numpy exact top-k (k=10) over 349 rows | < 5 ms |
 | LLM generation | ~1.5–4 s (dominant term) |
 | **End-to-end warm** | **< 5 s** |
 
@@ -536,7 +536,7 @@ Embedder is a module-level singleton; the corpus is 5 short pages, so the workin
 
 ## 12. Deployment Topology
 
-**Primary (demo):** local Streamlit against a prebuilt `chroma/`.
+**Primary (demo):** local Streamlit against a prebuilt `index/`.
 
 ```bash
 pip install -r requirements.txt
@@ -544,7 +544,7 @@ python -m src.ingest.run_all     # build corpus → chunks → embeddings → in
 streamlit run app.py
 ```
 
-**Optional (hosted link):** Streamlit Community Cloud with `chroma/`, `data/`, and `config/sources.csv` committed; `LLM_API_KEY` supplied as a platform secret. Embeddings are precomputed so the cloud container does not need to run `all-MiniLM-L6-v2` at boot for retrieval — though the embedder still loads locally to encode the query.
+**Optional (hosted link):** Streamlit Community Cloud with `index/`, `data/`, and `config/sources.csv` committed; `LLM_API_KEY` supplied as a platform secret. Embeddings are precomputed so the cloud container does not need to run `all-MiniLM-L6-v2` at boot for retrieval — though the embedder still loads locally to encode the query.
 
 **Fallback:** a notebook walking stages 1→8 with printed retrieval scores and citations, plus a ≤3-minute screen recording. The ingestion path is importable without the UI for exactly this reason.
 
@@ -554,7 +554,7 @@ streamlit run app.py
 
 | # | Decision | Rationale | Alternative rejected |
 |---|---|---|---|
-| AD-1 | ChromaDB persistent client, cosine space | Zero-ops, ships with metadata filtering, matches PRD | Pinecone/Qdrant — external service, no benefit at 5 docs |
+| AD-1 | numpy matrix persisted as `.npy`, cosine by dot | Zero-ops, exact search, no extra dependency, and it removes an entire bug class. Measured saving: ~65 MB resident (Chroma's 84 MB was partly numpy, which we still need). | ChromaDB — matched the PRD originally, but cost 84 MB/process and dropped strong neighbours via approximate HNSW; Pinecone/Qdrant — external service, no benefit at 349 chunks |
 | AD-2 | `all-MiniLM-L6-v2` | 384-dim, fast on CPU, strong retrieval quality | OpenAI embeddings — needs network, cost, no offline demo |
 | AD-3 | Guards before generation | Advice/PII become terminal states the LLM cannot override | Post-hoc filtering — the model has already produced the text |
 | AD-4 | Citation from metadata, not model output | Makes an uncited or fabricated answer structurally impossible | Letting the LLM write the link — hallucinates URLs |
@@ -602,10 +602,48 @@ Acceptance gates (PRD §10): groundedness 100%, exactly-one-citation 100%, ≤3 
 2. **Loading** — show `data/clean/*.txt`, note the boilerplate strip.
 3. **Chunking** — show 3 sample chunks with metadata; cite `notes/chunking.md` for the strategy choice.
 4. **Embedding** — show `all-MiniLM-L6-v2`, 384-dim, batch run.
-5. **Vector store** — show the Chroma collection and a chunk count.
-6. **Retrieval** — show top-4 chunks + similarity scores for one query.
+5. **Vector store** — show the numpy matrix shape (349×384) and a row count.
+6. **Retrieval** — show top-10 chunks + similarity scores for one query.
 7. **Generation** — show the ≤3-sentence answer, the one citation, the freshness stamp.
 8. **Guard: advice** — "Should I buy HDFC Small Cap Fund now?" → polite refusal + educational link.
 9. **Guard: PII** — feed a PAN + phone → blocked, nothing stored.
 10. **Out of scope** — "What is the 5-year return?" → no number, points to the official factsheet.
 11. **Closing** — deliverable list: prototype, source list, README, sample Q&A, disclaimer.
+
+## 15. Memory profile (measured, not estimated)
+
+The deployment target is Render's free tier, which caps a service at 512 MiB and
+kills it with `Out of memory (used over 512Mi)`. Measured peak resident set on
+the exact path a request takes (import Streamlit → import torch → load
+`all-MiniLM-L6-v2` → embed query → generate), sampled at 20 ms and cross-checked
+against `ru_maxrss`:
+
+| Stage | Peak RSS | Marginal |
+|---|---|---|
+| Python | 14 MB | — |
+| + numpy | 33 MB | +19 |
+| + streamlit | 50 MB | +17 |
+| + torch | 206 MB | **+155** |
+| + MiniLM model | 474 MB | **+268** |
+| + answer a query | 474 MB | +0 |
+| **Sampled instantaneous peak** | **550 MB** | |
+| **`ru_maxrss` peak** | **567 MB** | |
+
+Before this change, with Chroma, the same path peaked at 615–644 MB. So the
+numpy store bought ~65 MB — real, and it also fixed the recall defect — **but it
+is not sufficient on its own, and the app still exceeds 512 MiB.**
+
+The remaining cost is entirely the embedding stack: `import torch` is 155 MB and
+constructing the model is 268 MB, together 423 MB of the 474 MB steady state.
+Three things were measured and did *not* close the gap:
+
+- `model_kwargs={"low_cpu_mem_usage": True}` (with `accelerate` installed): 469 MB
+  vs 469 MB, no change, and bit-identical vectors. The peak is torch's import
+  and module init, not a double-buffered weight load.
+- `torch.set_num_threads(1)`: no reduction in peak RSS.
+- Import order (model before Streamlit, to avoid overlapping two large
+  allocations): 465 MB vs 474 MB, ~9 MB — real but not decisive.
+
+The fix is to drop torch for the query-time encoder (ONNX Runtime, ~50 MB, no
+155 MB import) or to run on an instance with more than 512 MiB. See
+`notes/retrieval.md` for the retrieval-side findings.

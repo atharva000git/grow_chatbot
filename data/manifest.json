@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-09-27T10:07:39+00:00",
+  "built_at": "2026-09-27T11:11:10+00:00",
   "n_docs": 10,
   "n_chunks": 349,
   "n_sources": 6,
@@ -10,7 +10,7 @@
   "chunk_overlap": 120,
   "top_k": 10,
   "similarity_threshold": 0.35,
-  "collection_name": "hdfc_faqs",
+  "vector_store": "numpy",
   "corpus_hash": "21d8dabde5c4a916",
   "sources": {
     "https://groww.in/mutual-funds/hdfc-large-cap-fund-direct-growth": "2026-09-27",

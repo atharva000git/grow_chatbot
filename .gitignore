@@ -1,6 +1,7 @@
 .env
 .venv/
 chroma/
+index/
 data/raw/
 data/embeddings/*
 !data/embeddings/.gitkeep

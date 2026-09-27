@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--rebuild",
         action="store_true",
-        help="wipe the Chroma collection before building",
+        help="delete the existing index before building",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"\ncorpus_hash {manifest['corpus_hash']}  "
         f"docs {manifest['n_docs']}  chunks {manifest['n_chunks']}  "
-        f"sources {manifest['n_sources']}  collection {settings.COLLECTION_NAME}"
+        f"sources {manifest['n_sources']}  vectors {settings.INDEX_DIR}/*.npy (numpy)"
     )
     print(f"vectors {len(vectors)}  ids aligned {chunk_ids == [c.chunk_id for c in chunks]}")
     print(f"manifest {manifest_path.relative_to(manifest_path.parents[1])}")

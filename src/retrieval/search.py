@@ -20,6 +20,8 @@ import re
 import time
 from dataclasses import dataclass
 
+import numpy as np
+
 from config import settings
 from src.models import Chunk, RetrievedChunk
 from src.retrieval.embedder import embed_query
@@ -28,7 +30,7 @@ log = logging.getLogger(__name__)
 
 
 class IndexNotBuilt(RuntimeError):
-    """The Chroma collection is missing or empty."""
+    """The vector index is missing, empty, or unreadable."""
 
 
 # Distinctive tokens per scheme, matched against the scheme column of
@@ -130,47 +132,57 @@ def detect_section_filter(query: str) -> str | None:
     return None
 
 
-def _collection():
-    from src.ingest.store import get_client, get_collection
+def _index() -> tuple[np.ndarray, list[dict]]:
+    from src.ingest.store import load_index
 
     try:
-        collection = get_collection()
+        matrix, rows = load_index()
     except Exception as exc:  # noqa: BLE001 - surfaced as a named error
         raise IndexNotBuilt(
-            "Could not open the Chroma index. Build it with:\n"
+            "Could not open the vector index. Build it with:\n"
             "    python -m src.ingest.run_all --rebuild\n"
             f"underlying error: {exc}"
         ) from exc
-    if collection.count() == 0:
+    if matrix.shape[0] == 0:
         raise IndexNotBuilt(
-            "The Chroma collection is empty. Build it with:\n"
+            "The vector index is empty. Build it with:\n"
             "    python -m src.ingest.run_all --rebuild"
         )
-    return collection
+    return matrix, rows
 
 
-def _to_hits(ids: list[str], docs: list[str], metadatas: list[dict], distances: list[float]) -> list[RetrievedChunk]:
+def _mask(rows: list[dict], filter_scheme: str | None, filter_section: str | None) -> np.ndarray:
+    """Rows matching every supplied clause, mirroring Chroma's `$and` of `$eq`."""
+    mask = np.ones(len(rows), dtype=bool)
+    if filter_scheme:
+        mask &= np.fromiter((row["scheme"] == filter_scheme for row in rows), bool, len(rows))
+    if filter_section:
+        mask &= np.fromiter((row["section"] == filter_section for row in rows), bool, len(rows))
+    return mask
+
+
+def _to_hits(rows: list[dict], indices: np.ndarray, scores: np.ndarray) -> list[RetrievedChunk]:
     hits: list[RetrievedChunk] = []
-    for chunk_id, text, metadata, distance in zip(ids, docs, metadatas, distances):
-        # Chroma cosine distance is 1 - cosine_similarity; clamp because a
-        # float32 round-trip can nudge it just outside the unit interval.
-        similarity = min(1.0, max(0.0, 1.0 - float(distance)))
+    for index in indices:
+        row = rows[int(index)]
+        # Clamp because a float32 dot product can land a hair outside the unit
+        # interval, and callers compare against a fixed threshold.
+        similarity = min(1.0, max(0.0, float(scores[int(index)])))
         hits.append(
             RetrievedChunk(
                 chunk=Chunk(
-                    chunk_id=chunk_id,
-                    text=text,
-                    source_url=str(metadata.get("source_url", "")),
-                    scheme=str(metadata.get("scheme", "")),
-                    category=str(metadata.get("category", "")),
-                    section=str(metadata.get("section", "overview")),
-                    chunk_index=int(metadata.get("chunk_index", 0)),
-                    fetched_at=str(metadata.get("fetched_at", "")),
+                    chunk_id=str(row["chunk_id"]),
+                    text=str(row["text"]),
+                    source_url=str(row.get("source_url", "")),
+                    scheme=str(row.get("scheme", "")),
+                    category=str(row.get("category", "")),
+                    section=str(row.get("section", "overview")),
+                    chunk_index=int(row.get("chunk_index", 0)),
+                    fetched_at=str(row.get("fetched_at", "")),
                 ),
                 similarity=similarity,
             )
         )
-    hits.sort(key=lambda hit: hit.similarity, reverse=True)
     return hits
 
 
@@ -180,33 +192,44 @@ def search(
     scheme: str | None = None,
 ) -> list[RetrievedChunk]:
     """Rank chunks for a question, most similar first."""
-    collection = _collection()
+    matrix, rows = _index()
     top_k = k or settings.TOP_K
-    embedding = embed_query(query)
+    embedding = np.asarray(embed_query(query), dtype=np.float32)
+    # The stored rows are unit vectors (store._normalise), so a dot product is
+    # the cosine. Normalising the query closes the same contract from this side.
+    norm = float(np.linalg.norm(embedding))
+    if norm == 0.0:
+        raise IndexNotBuilt("query produced a zero-length embedding; cannot score it")
+    scores = matrix @ (embedding / norm)
+
     detected = scheme or detect_scheme_filter(query)
     if scheme is not None:
         detected = scheme
     section = detect_section_filter(query)
 
-    def run(filter_scheme: str | None, filter_section: str | None, limit: int) -> list[RetrievedChunk]:
-        clauses: list[dict] = []
-        if filter_scheme:
-            clauses.append({"scheme": {"$eq": filter_scheme}})
-        if filter_section:
-            clauses.append({"section": {"$eq": filter_section}})
-        where = clauses[0] if len(clauses) == 1 else ({"$and": clauses} if clauses else None)
-        result = collection.query(
-            query_embeddings=[embedding],
-            n_results=limit,
-            where=where,
-            include=["documents", "metadatas", "distances"],
-        )
-        return _to_hits(
-            result["ids"][0],
-            result["documents"][0],
-            result["metadatas"][0],
-            result["distances"][0],
-        )
+    def run(
+        filter_scheme: str | None,
+        filter_section: str | None,
+        limit: int,
+        exclude: set[str],
+    ) -> list[RetrievedChunk]:
+        candidates = np.flatnonzero(_mask(rows, filter_scheme, filter_section))
+        if candidates.size == 0:
+            return []
+        # Sort only the surviving rows, so a filter narrows the pool and the
+        # best of what is left still wins. `stable` keeps insertion order for
+        # equal scores, which a plain argsort does not guarantee.
+        order = np.argsort(-scores[candidates], kind="stable")
+        # Skip rows an earlier, narrower attempt already contributed, and keep
+        # scanning past them. Truncating to `limit` first and then discarding
+        # duplicates cannot backfill, so a heavily-overlapping relaxation left
+        # the window short - 8 of 10 with two filters sharing a chunk.
+        picked = [
+            index
+            for index in candidates[order]
+            if str(rows[int(index)]["chunk_id"]) not in exclude
+        ][:limit]
+        return _to_hits(rows, np.asarray(picked, dtype=np.int64), scores)
 
     # Narrowest first, then relax. Each step is a recall safety net, not a
     # ranking trick: a filter that returns nothing must never become a false
@@ -233,20 +256,15 @@ def search(
     collected: list[RetrievedChunk] = []
     seen: set[str] = set()
     for index, (filter_scheme, filter_section) in enumerate(attempts):
-        added = 0
-        for hit in run(filter_scheme, filter_section, top_k - len(collected)):
-            if hit.chunk.chunk_id in seen:
-                continue
-            seen.add(hit.chunk.chunk_id)
-            collected.append(hit)
-            added += 1
-            if len(collected) >= top_k:
-                break
+        added = run(filter_scheme, filter_section, top_k - len(collected), seen)
         if added and index:
             log.info(
                 "relaxed to scheme=%r section=%r and added %d hit(s) to fill k=%d",
-                filter_scheme, filter_section, added, top_k,
+                filter_scheme, filter_section, len(added), top_k,
             )
+        for hit in added:
+            seen.add(hit.chunk.chunk_id)
+            collected.append(hit)
         if len(collected) >= top_k:
             break
     return collected
