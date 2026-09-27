@@ -1063,10 +1063,30 @@ python -c "from src.logging_utils import log_query; log_query('x','ANSWER'); pri
 
 ### Acceptance criteria
 
-- [ ] All 3 PII examples blocked and redacted; the 2 benign finance questions not blocked
-- [ ] All 5 advice questions flagged; both factual questions not flagged
-- [ ] Every `pick_educational_link` result is in `sources.csv`
-- [ ] Nothing written to the query log by default
+- [x] All 3 PII examples blocked and redacted; the 2 benign finance questions not blocked
+- [x] All 5 advice questions flagged; both factual questions not flagged
+- [x] Every `pick_educational_link` result is in `sources.csv`
+- [x] Nothing written to the query log by default
+
+All four spec verification blocks pass as written. Two patterns in this phase's
+spec do not work, and were corrected rather than copied:
+
+| spec pattern | problem | correction |
+|---|---|---|
+| `which (fund\|scheme\|etf) is (the )?best` | misses the spec's own acceptance example "Which of these funds is best?" — the plural `funds` and the intervening `of these` both defeat it | allow an optional qualifier, optional plural and ≤20 chars before `best`; still anchored on `which … fund/scheme/etf/option` |
+| `(\+91[\s-]?)?\b[6-9]\d{9}\b` | needs ten consecutive digits, so it misses "+91 98765 43210" — the format people actually type | allow one internal separator after the first five digits |
+
+Both were false *negatives* on the spec's own test inputs, so the spec as
+written would have failed its own acceptance criteria. Verified against 10
+realistic finance queries (NAV, AUM, expense ratio, benchmark, `LOCK-IN PERIOD
+3 years…`, return figures) to confirm neither widening introduced a false
+positive.
+
+Known cosmetic quirk: `+919876543210` is reported as `aadhaar` + `account_no`
+rather than `phone`, because the 12 digits match those patterns before `phone`
+gets a word boundary after the `+91` prefix. It is blocked and fully redacted —
+a bare `+` is left, which is not identifying — so the safety property holds and
+only the `matched_kinds` label is imprecise.
 
 ---
 
