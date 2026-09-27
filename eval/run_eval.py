@@ -91,20 +91,25 @@ def run_case(case: dict) -> Result:
         citation = response.citation_url
         answer = response.answer_text
     except LLMUnavailable as exc:
-        # Not a failure of the system: there is no key. Reported as its own
-        # state so a keyless run cannot be mistaken for a passing one.
+        # Split the two causes. "No key" means the harness is unconfigured;
+        # anything else (rate limit, 5xx, transport) means the provider let us
+        # down on a question we were perfectly able to answer. Collapsing them
+        # into one label sent me hunting for a missing key when the real cause
+        # was a per-minute token quota, which a TOP_K=10 prompt crosses.
+        message = str(exc)
+        actual = "ERROR:NO_KEY" if "No LLM_API_KEY" in message else "ERROR:PROVIDER"
         latency = perf_counter() - t0
         return Result(
             case_id=case["id"],
             query=case["query"],
             expected=expected,
-            actual="ERROR:NO_KEY",
+            actual=actual,
             passed=False,
             scheme_match=False,
             citation=None,
             citation_grounded=False,
             latency_s=latency,
-            note=str(exc),
+            note=message,
             answer="",
         )
     latency = perf_counter() - t0
@@ -148,6 +153,7 @@ def render_samples(results: list[Result], status: dict) -> str:
     answered = [r for r in results if r.actual == "ANSWER"]
     grounded = [r for r in answered if r.citation_grounded]
     no_key = [r for r in results if r.actual == "ERROR:NO_KEY"]
+    provider = [r for r in results if r.actual == "ERROR:PROVIDER"]
     out = [
         "# Sample Q&A",
         "",
@@ -159,6 +165,18 @@ def render_samples(results: list[Result], status: dict) -> str:
         f"- Grounding rate: {len(grounded)}/{len(answered)} cited answers point at a URL in `config/sources.csv`",
         "",
     ]
+    if provider:
+        out += [
+            f"> **Incomplete: {len(provider)} of {len(results)} cases hit a provider error.**",
+            "> These are recorded as `ERROR:PROVIDER`, not `ERROR:NO_KEY` - a key is",
+            "> present and the question was answerable. The usual cause is a per-minute",
+            "> token quota, which a wide retrieval window makes easier to cross:",
+            ">",
+            "> ```bash",
+            "> python eval/run_eval.py   # 429s are retried with backoff; re-run to fill in",
+            "> ```",
+            "",
+        ]
     if no_key:
         out += [
             f"> **Incomplete: {len(no_key)} of {len(results)} cases could not run.**",

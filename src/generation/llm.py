@@ -9,6 +9,7 @@ becomes `LLMUnavailable` and the orchestrator lets it propagate.
 from __future__ import annotations
 
 import logging
+import time
 
 import requests
 
@@ -26,6 +27,10 @@ log = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_MODEL = "gpt-4o-mini"
 TIMEOUT_SECONDS = 30
+# A 429 is retried rather than surfaced. See generate() for why a wide
+# retrieval window makes it common enough to be worth handling.
+RATE_LIMIT_ATTEMPTS = 4
+RETRY_BACKOFF_SECONDS = 8
 
 
 class LLMUnavailable(RuntimeError):
@@ -59,22 +64,53 @@ def generate(prompt: str) -> str:
         "temperature": settings.LLM_TEMPERATURE,
         "max_tokens": settings.LLM_MAX_TOKENS,
     }
-    try:
-        response = requests.post(
-            f"{client['base_url']}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {client['api_key']}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        body = response.json()
-        return str(body["choices"][0]["message"]["content"] or "").strip()
-    except Exception as exc:  # noqa: BLE001 - every provider failure is one outcome
-        log.warning("LLM call failed: %s", exc)
-        raise LLMUnavailable(f"LLM call failed: {exc}") from exc
+    for attempt in range(RATE_LIMIT_ATTEMPTS):
+        try:
+            response = requests.post(
+                f"{client['base_url']}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {client['api_key']}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=TIMEOUT_SECONDS,
+            )
+        except Exception as exc:  # noqa: BLE001 - transport failures are retryable
+            if attempt == RATE_LIMIT_ATTEMPTS - 1:
+                log.warning("LLM transport failure: %s", exc)
+                raise LLMUnavailable(f"could not reach the provider: {exc}") from exc
+            time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
+            continue
+
+        if response.status_code == 429:
+            # A wider retrieval window makes this routine rather than exotic:
+            # at TOP_K=10 one prompt is ~2x the tokens of TOP_K=4, and a batch
+            # of eval questions crosses the provider's per-minute budget
+            # partway through. Retrying beats failing the answer, because the
+            # user's question was fine - the quota was not.
+            if attempt < RATE_LIMIT_ATTEMPTS - 1:
+                wait = RETRY_BACKOFF_SECONDS * (attempt + 1)
+                log.warning("rate limited (429), retrying in %ss (attempt %d)", wait, attempt + 1)
+                time.sleep(wait)
+                continue
+            raise LLMUnavailable(
+                "rate limited by the provider (HTTP 429) after "
+                f"{RATE_LIMIT_ATTEMPTS} attempts. Wait a minute and retry, or lower "
+                "TOP_K in config/settings.py to shrink the prompt."
+            )
+
+        if response.status_code >= 400:
+            raise LLMUnavailable(
+                f"provider returned HTTP {response.status_code}: {response.text[:200]}"
+            )
+
+        try:
+            body = response.json()
+            return str(body["choices"][0]["message"]["content"] or "").strip()
+        except Exception as exc:  # noqa: BLE001 - malformed success body
+            log.warning("LLM returned an unreadable body: %s", exc)
+            raise LLMUnavailable(f"provider returned an unreadable response: {exc}") from exc
+    raise LLMUnavailable("LLM call failed for an unclassified reason")
 
 
 def generate_raw(query: str, hits: list[RetrievedChunk]) -> str:

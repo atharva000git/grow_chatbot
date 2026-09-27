@@ -130,6 +130,13 @@ LOG_QUERIES = False
 EDUCATIONAL_LINKS = {}
 ```
 
+> **Amended after Phase 0.** `TOP_K` was raised from 4 to 10. The block above is
+> left as the Phase 0 as-built record; the current value is in
+> `config/settings.py`, and the reasoning, the measured token cost and the two
+> bugs fixed along the way are in `notes/retrieval.md`. Section detection also
+> switched from substring to word-boundary matching, because the `fees` token
+> `ter` was matching inside `riskometer`.
+
 ### Cursor Prompt — Phase 0
 
 ```
@@ -1845,7 +1852,7 @@ the behaviour had rotted.
 ## Phase 13 — Live verification with a real provider
 
 Run with a Groq key (`qwen/qwen3.8-27b`) configured. Purpose: close the one path
-that 154 keyless tests could not reach. It did, and it found two defects — which
+that the keyless tests could not reach. It did, and it found two defects — which
 is the finding worth keeping, because both are *interaction* bugs: code that is
 correct in isolation and wrong against a model that volunteers more than a stub
 does.

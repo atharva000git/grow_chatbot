@@ -16,6 +16,7 @@ Two behaviours worth knowing about:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass
 
@@ -102,11 +103,29 @@ SECTION_TOKENS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+def _section_patterns() -> tuple[tuple[str, tuple[re.Pattern[str], ...]], ...]:
+    """Compile SECTION_TOKENS into word-boundary matchers, once, at first use.
+
+    Plain substring matching is wrong here, and not hypothetically: the `fees`
+    tokens include "ter" (total expense ratio), and "riskome-ter" contains it.
+    Every riskometer question was therefore filtered to the fees section, which
+    is the one section guaranteed not to contain the riskometer. Word
+    boundaries stop the collision; the optional plural keeps "SIPs" and
+    "expenses" matching.
+    """
+    return tuple(
+        (
+            name,
+            tuple(re.compile(rf"\b{re.escape(token)}s?\b", re.IGNORECASE) for token in tokens),
+        )
+        for name, tokens in SECTION_TOKENS
+    )
+
+
 def detect_section_filter(query: str) -> str | None:
     """Return the section label a question is asking about, or None."""
-    lowered = query.lower()
-    for name, tokens in SECTION_TOKENS:
-        if any(token in lowered for token in tokens):
+    for name, patterns in _section_patterns():
+        if any(pattern.search(query) for pattern in patterns):
             return name
     return None
 
@@ -192,19 +211,45 @@ def search(
     # Narrowest first, then relax. Each step is a recall safety net, not a
     # ranking trick: a filter that returns nothing must never become a false
     # "no answer", so the query is retried one clause looser before giving up.
-    attempts: list[tuple[str | None, str | None]] = [(detected, section), (detected, None), (None, None)]
+    #
+    # Steps are accumulated rather than short-circuited, because returning the
+    # first non-empty attempt made TOP_K a ceiling in name only - a section
+    # filter that matched 2 chunks stopped the search there and the prompt saw
+    # 2, not TOP_K. Dedupe by chunk_id so a chunk reachable through two filters
+    # is not counted twice, and order is preserved narrowest-first rather than
+    # re-sorted by similarity: hits[0] must stay the precise match, because the
+    # sufficiency gate, the citation and the answer's anchor all read it.
+    #
+    # Relaxing to (None, None) is a last resort, not the default filler. It is
+    # the only step that admits other schemes' chunks, and a cross-scheme fact
+    # ("the exit load is X" from the wrong fund) is worse than a narrow answer.
+    # A single scheme holds 40+ chunks, so the scheme-anchored steps fill the
+    # window on their own for any real question.
+    attempts: list[tuple[str | None, str | None]] = [(detected, section), (detected, None)]
     if not detected:
-        attempts = [(None, section), (None, None)]
+        attempts = [(None, section)]
+    attempts.append((None, None))
+
+    collected: list[RetrievedChunk] = []
+    seen: set[str] = set()
     for index, (filter_scheme, filter_section) in enumerate(attempts):
-        hits = run(filter_scheme, filter_section, top_k)
-        if hits:
-            if index:
-                log.info(
-                    "no hit for scheme=%r section=%r; relaxed to scheme=%r section=%r",
-                    detected, section, filter_scheme, filter_section,
-                )
-            return hits
-    return []
+        added = 0
+        for hit in run(filter_scheme, filter_section, top_k - len(collected)):
+            if hit.chunk.chunk_id in seen:
+                continue
+            seen.add(hit.chunk.chunk_id)
+            collected.append(hit)
+            added += 1
+            if len(collected) >= top_k:
+                break
+        if added and index:
+            log.info(
+                "relaxed to scheme=%r section=%r and added %d hit(s) to fill k=%d",
+                filter_scheme, filter_section, added, top_k,
+            )
+        if len(collected) >= top_k:
+            break
+    return collected
 
 
 def best_similarity(hits: list[RetrievedChunk]) -> float:

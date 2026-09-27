@@ -154,7 +154,7 @@ either.
 
 ```bash
 pip install -r eval/requirements.txt
-pytest tests -q                    # 154 tests, keyless, no network, ~0.5 s
+pytest tests -q                    # 184 tests, keyless, no network, ~3.5 s
 python eval/run_eval.py            # writes samples/sample_qa.md
 ```
 
@@ -226,7 +226,7 @@ records sanitized text and an intent, and is a no-op unless `LOG_QUERIES=true`.
 **Verified against a real model, and it found two defects.** With a key
 configured, `run_eval.py` reports **11/11, 100% grounding, 1.3 s mean latency**
 (Groq, `qwen/qwen3.8-27b`). That run was not a formality — it exposed two bugs
-that 154 keyless tests could not, because both needed a model that writes like a
+that the keyless tests could not, because both needed a model that writes like a
 model rather than like a stub:
 
 * **The validator let the model state the freshness date.** `FRESHNESS_RE`

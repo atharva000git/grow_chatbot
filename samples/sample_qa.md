@@ -13,13 +13,13 @@ below are the live output of the system, not written by hand.
 
 **Intent:** `ANSWER` (expected `ANSWER`)
 
-The expense ratio for the HDFC Large Cap Fund - Direct - Growth is 1.03%.
+The expense ratio for the HDFC Large Cap Fund Direct Growth is 1.03%.
 Source: https://groww.in/mutual-funds/hdfc-large-cap-fund-direct-growth
 Last updated from sources: 2026-09-27
 
 **Source:** [https://groww.in/mutual-funds/hdfc-large-cap-fund-direct-growth](https://groww.in/mutual-funds/hdfc-large-cap-fund-direct-growth)
 
-*Latency: 11.510s. Direct-plan expense ratio, read from the 'Expenses' section.*
+*Latency: 5.409s. Direct-plan expense ratio, read from the 'Expenses' section.*
 
 ---
 
@@ -27,13 +27,13 @@ Last updated from sources: 2026-09-27
 
 **Intent:** `ANSWER` (expected `ANSWER`)
 
-The HDFC Equity Fund (Flexi Cap) charges an exit load of 1.00% if units are redeemed or switched out within 1 year from the date of allotment. No exit load is payable if the redemption or switch-out occurs after 1 year.
+An exit load of 1.00% is payable if units are redeemed or switched out within 1 year from the date of allotment. No exit load is applicable if the redemption or switch-out occurs after 1 year.
 Source: https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf
 Last updated from sources: 2026-09-27
 
 **Source:** [https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf](https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf)
 
-*Latency: 0.444s. Exit load for a Flexi Cap scheme. The corpus only holds the direct-growth variant, so the answer must say so rather than invent the other plans.*
+*Latency: 0.544s. Exit load for a Flexi Cap scheme. The corpus only holds the direct-growth variant, so the answer must say so rather than invent the other plans.*
 
 ---
 
@@ -41,13 +41,13 @@ Last updated from sources: 2026-09-27
 
 **Intent:** `ANSWER` (expected `ANSWER`)
 
-The minimum SIP investment for HDFC Small Cap Fund - Direct - Growth is ₹100.
+The minimum SIP investment for the HDFC Small Cap Fund Direct Growth is ₹100.
 Source: https://groww.in/mutual-funds/hdfc-small-cap-fund-direct-growth
 Last updated from sources: 2026-09-27
 
 **Source:** [https://groww.in/mutual-funds/hdfc-small-cap-fund-direct-growth](https://groww.in/mutual-funds/hdfc-small-cap-fund-direct-growth)
 
-*Latency: 0.315s. Minimum SIP from the 'SIP' section.*
+*Latency: 0.326s. Minimum SIP from the 'SIP' section.*
 
 ---
 
@@ -55,13 +55,13 @@ Last updated from sources: 2026-09-27
 
 **Intent:** `ANSWER` (expected `ANSWER`)
 
-The lock-in period for the fund is 3 years from the date of allotment of the respective Units. You can exit the investment after this 3-year period has elapsed.
+The lock-in period for the HDFC ELSS Tax Saver Fund is 3 years from the date of allotment of the respective Units. You can exit the scheme after this 3-year period has elapsed.
 Source: https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf
 Last updated from sources: 2026-09-27
 
 **Source:** [https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf](https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf)
 
-*Latency: 0.354s. Lock-in and exit eligibility, from the 'Lock-in' / 'Tax' sections.*
+*Latency: 0.456s. Lock-in and exit eligibility, from the 'Lock-in' / 'Tax' sections.*
 
 ---
 
@@ -69,13 +69,13 @@ Last updated from sources: 2026-09-27
 
 **Intent:** `ANSWER` (expected `ANSWER`)
 
-The benchmark for the scheme is the NIFTY 50 Hybrid Composite Debt 50:50 Index (Total Returns Index). The provided context does not contain information regarding the riskometer category.
-Source: https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf
+The benchmark for the HDFC Balanced Advantage Fund is the NIFTY 50 Hybrid Composite Debt 50:50 Index. The scheme is rated as Very High risk.
+Source: https://groww.in/mutual-funds/hdfc-balanced-advantage-fund-direct-growth
 Last updated from sources: 2026-09-27
 
-**Source:** [https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf](https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf)
+**Source:** [https://groww.in/mutual-funds/hdfc-balanced-advantage-fund-direct-growth](https://groww.in/mutual-funds/hdfc-balanced-advantage-fund-direct-growth)
 
-*Latency: 0.561s. Two facts from one scheme; riskometer lives under 'Risk'.*
+*Latency: 8.620s. Two facts from one scheme; riskometer lives under 'Risk'.*
 
 ---
 
@@ -87,7 +87,7 @@ I don't have that in the sources I can cite. I only answer from the official HDF
 
 **Source:** none - this response is not a fact drawn from a document.
 
-*Latency: 0.335s. Service request, not a scheme fact. The original expectation was ANSWER on the stated premise that this is 'grounded in the factsheet's How to download / servicing section'. That premise is false: 'capital gain', 'How to download', 'Account statement' and 'tax statement' all occur ZERO times across the 10 cleaned documents (verified). Answering it would require inventing a process, and it is account servicing, which README section 2 lists as out of scope. INSUFFICIENT_CONTEXT is therefore the correct outcome and the runner accepts either.*
+*Latency: 8.693s. Service request, not a scheme fact. The original expectation was ANSWER on the stated premise that this is 'grounded in the factsheet's How to download / servicing section'. That premise is false: 'capital gain', 'How to download', 'Account statement' and 'tax statement' all occur ZERO times across the 10 cleaned documents (verified). Answering it would require inventing a process, and it is account servicing, which README section 2 lists as out of scope. INSUFFICIENT_CONTEXT is therefore the correct outcome and the runner accepts either.*
 
 ---
 
@@ -95,13 +95,13 @@ I don't have that in the sources I can cite. I only answer from the official HDF
 
 **Intent:** `ANSWER` (expected `ANSWER_OR_INSUFFICIENT`)
 
-The provided context lists NAVs for Regular and Direct Plans under Growth and IDCW options but does not explicitly identify the scheme as "HDFC Large Cap Fund." Therefore, I cannot confirm the specific NAV for that named fund from the given text.
-Source: https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf
+The NAV for the HDFC Large Cap Fund Direct Growth option is ₹1,189.08 as of 25 Sep '26.
+Source: https://groww.in/mutual-funds/hdfc-large-cap-fund-direct-growth
 Last updated from sources: 2026-09-27
 
-**Source:** [https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf](https://files.hdfcfund.com/s3fs-public/2026-09/HDFC%20MF%20Factsheet%20-%20August%202026.pdf)
+**Source:** [https://groww.in/mutual-funds/hdfc-large-cap-fund-direct-growth](https://groww.in/mutual-funds/hdfc-large-cap-fund-direct-growth)
 
-*Latency: 0.425s. NAV is a live figure. Almost certainly not in a static scheme page, so INSUFFICIENT_CONTEXT is a correct and honest outcome. The runner accepts either.*
+*Latency: 24.932s. NAV is a live figure. Almost certainly not in a static scheme page, so INSUFFICIENT_CONTEXT is a correct and honest outcome. The runner accepts either.*
 
 ---
 
@@ -113,7 +113,7 @@ I can share what these funds publish - exit load, lock-in, benchmark, minimum SI
 
 **Source:** [https://groww.in/mutual-funds/hdfc-large-cap-fund-direct-growth](https://groww.in/mutual-funds/hdfc-large-cap-fund-direct-growth)
 
-*Latency: 0.084s. Advice request. Must short-circuit before generation.*
+*Latency: 0.079s. Advice request. Must short-circuit before generation.*
 
 ---
 

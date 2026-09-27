@@ -285,7 +285,7 @@ Refusal text is fixed, ≤2 sentences, plus one **educational link** chosen from
 
 | Param | Value | Rationale |
 |---|---|---|
-| `top_k` | 4 | Enough context for a 3-sentence answer without diluting |
+| `top_k` | 10 | Filled, not capped: 8-10 chunks in practice. Costs 2.1x prompt tokens — see `notes/retrieval.md` |
 | `distance_metric` | cosine | Consistent with MiniLM training |
 | `threshold τ` | 0.35 similarity (unchanged; see below) | Below this the corpus does not cover the question |
 | scheme pre-filter | on when the query names a scheme | Boosts precision for single-scheme questions |
@@ -433,7 +433,7 @@ CHUNK_SIZE        = 800
 CHUNK_OVERLAP     = 120
 MIN_CHUNK_CHARS   = 80
 MIN_DOC_CHARS     = 1000             # sanity gate, FR-1
-TOP_K             = 4
+TOP_K             = 10
 SIMILARITY_THRESHOLD = 0.35
 LLM_TEMPERATURE   = 0.0
 LLM_MAX_TOKENS    = 220

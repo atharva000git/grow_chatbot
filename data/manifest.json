@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-09-27T09:13:33+00:00",
+  "built_at": "2026-09-27T10:07:39+00:00",
   "n_docs": 10,
   "n_chunks": 349,
   "n_sources": 6,
@@ -8,7 +8,7 @@
   "chunk_strategy": "recursive",
   "chunk_size": 800,
   "chunk_overlap": 120,
-  "top_k": 4,
+  "top_k": 10,
   "similarity_threshold": 0.35,
   "collection_name": "hdfc_faqs",
   "corpus_hash": "21d8dabde5c4a916",
