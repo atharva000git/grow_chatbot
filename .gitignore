@@ -2,6 +2,7 @@
 .venv/
 chroma/
 data/raw/
-data/embeddings/
+data/embeddings/*
+!data/embeddings/.gitkeep
 __pycache__/
 *.pyc
