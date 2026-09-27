@@ -20,13 +20,19 @@ ADVICE_PATTERNS: list[str] = [
     r"\bshould\s+(i|we)\b",
     r"\bdo you (think|recommend)\b",
     # implementation.md gives `which (fund|scheme|etf) is (the )?best`, which does
-    # not match its own acceptance example "Which of these funds is best?" - the
-    # plural "funds" and the intervening "of these" both defeat it. Widened to
-    # allow an optional qualifier, an optional plural and up to 20 characters
-    # before "best", so the spec's own test input is actually caught. Still
-    # anchored on "which ... fund/scheme/etf/option", so a factual question that
-    # merely contains the word "best" is unaffected.
-    r"\bwhich\s+(of\s+(these|those|my|the|your|all)\s+)?(fund|scheme|etf|option)s?\b.{0,20}?\bbest\b",
+    # not match the spec's own acceptance examples - "Which of these funds is
+    # best?" and Phase 9's "Which of these five funds is best?" - because of the
+    # plural and the intervening words. Up to three arbitrary words are allowed
+    # between "which" and the noun so qualifiers and counts both pass
+    # ("of these five", "of the 5", "of my two"). Still anchored on
+    # "which ... fund/scheme/etf/option" with "best" within 20 characters, so a
+    # factual question that merely contains "best" is unaffected.
+    r"\bwhich\s+(?:\w+\s+){0,3}?(fund|scheme|etf|option)s?\b.{0,20}?\b(?:best|better)\b",
+    # PRD section 9 item 10, "Is HDFC ELSS a good fit for me?", is a must-refuse
+    # and the spec's list has no pattern for it. Anchored on the trailing "for
+    # me/my" so a factual suitability sentence without a first-person reference
+    # is not swept up.
+    r"\b(?:good|right|better|ideal) (?:fit|choice|option|alternative) for (?:me|my)\b",
     r"\bis (now|it) a good time\b",
     r"\bgood time to invest\b",
     r"\bhow much should i\b",
@@ -34,6 +40,10 @@ ADVICE_PATTERNS: list[str] = [
     r"\bbuild (me )?a portfolio\b",
     r"\bsuitable for me\b",
     r"\bhighest returns?\b",
+    # "What is the best performing fund?" is a ranking request, and the spec's
+    # `which ... is best` pattern cannot see it because the question opens with
+    # "what". Matched on the phrase itself, which no factual query needs.
+    r"\bbest[- ]performing\b",
     r"\b(better|safer) (option|choice|fund)\b",
     r"\bworth (buying|investing)\b",
 ]

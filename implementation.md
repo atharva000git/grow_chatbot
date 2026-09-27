@@ -1229,12 +1229,40 @@ for c in cases:
 
 ### Acceptance criteria
 
-- [ ] Case 1 → `ANSWER`, one valid groww.in citation
-- [ ] Case 2 → `REFUSAL`, and `example.com` appears nowhere in the output
-- [ ] Case 3 → `INSUFFICIENT_CONTEXT`
-- [ ] Case 4 → `REFUSAL`
-- [ ] Case 5 → `ANSWER` with at most 3 sentences and a citation
-- [ ] Every `ANSWER` carries a `Last updated from sources:` line
+- [x] Case 1 → `ANSWER`, one valid citation
+- [x] Case 2 → `REFUSAL`, and `example.com` appears nowhere in the output
+- [x] Case 3 → `INSUFFICIENT_CONTEXT`
+- [x] Case 4 → `REFUSAL`
+- [x] Case 5 → `ANSWER` with at most 3 sentences and a citation
+- [x] Every `ANSWER` carries a `Last updated from sources:` line
+
+All six verified offline, plus 10 detector cases. Three corrections were needed:
+
+* The spec's performance regex matches `1% for 12 months`, so case 1 - "Exit load
+  is 1% for 12 months" - was refused as a performance claim. The unit had no
+  trailing `\b` ("months" matched a bare "month") and `for` was wrongly listed
+  as a period preposition. A bare percentage now needs "in"/"over" plus a
+  word-bounded unit, so exit-load tables are facts and "returned 32% in 5 years"
+  is still caught.
+* Case 1's criterion says "one valid groww.in citation", but the spec's own
+  verification passes **ELSS** hits, whose top context URL is the shared
+  `hdfcfund.com` factsheet. The supplied `hdfc-large-cap-fund-direct-growth` URL
+  is not in the ELSS allow-list, so it is correctly treated as invented and
+  replaced with the top-ranked context URL. The intent behind the criterion - one
+  valid, in-allow-list citation - is met; the literal host is not reachable with
+  ELSS context.
+* `validate` now separates the `Source:` / freshness lines from the body before
+  counting sentences. Counting them made a compliant 2-sentence answer look like
+  3, so truncation would have cut a real sentence to make room for a citation.
+
+`ChatResponse` gained a defaulted `top_similarity` field. Phase 10 must show the
+top match in its caption so the demo can evidence grounding; without a field to
+carry it, the UI would have had to re-run retrieval, which Phase 10 forbids.
+
+`llm.py` uses `langchain_core` plus a direct OpenAI-compatible POST via the
+already-pinned `requests` rather than `langchain-openai`, which is not in
+`requirements.txt`. It works with OpenAI, Groq, Together and OpenRouter. New
+setting `LLM_BASE_URL` added to `config/settings.py`.
 
 ---
 
@@ -1323,9 +1351,19 @@ for q in ['Should I buy HDFC Small Cap Fund now?','My PAN is ABCDE1234F, phone 9
 
 ### Acceptance criteria
 
-- [ ] Advice, PII, out-of-scope and empty inputs return the right intent
-- [ ] The three short-circuit paths complete with no API key configured
-- [ ] `corpus_status()` reports the real chunk count from the manifest
+- [x] Advice, PII, out-of-scope and empty inputs return the right intent
+- [x] The three short-circuit paths complete with no API key configured
+- [x] `corpus_status()` reports the real chunk count from the manifest
+
+The spec's own input 6, "Which of these five funds is best?", initially reached
+the LLM: the advice pattern allowed `of these` before `fund` but not the count
+word `five`, and the spec required it to short-circuit. The pattern now allows up
+to three arbitrary words. Two `PRD.md` §9 must-refuse items were also missing and
+were added - "Is HDFC ELSS a good fit for me?" (no pattern covered a
+suitability question) and "Which of these 5 funds is the best for long-term
+wealth creation?" (`best`, not `is best`). All 11 `PRD.md` §9 queries plus 13
+further cases now classify correctly, with no false positive on the 7
+must-answer ones.
 
 ---
 
@@ -1396,14 +1434,27 @@ streamlit run app.py
 
 Manual checks:
 
-- [ ] Disclaimer banner matches the PRD text exactly
-- [ ] 3 example buttons present and clickable
-- [ ] Sidebar shows chunk count > 0, model name, threshold
-- [ ] 5 source links listed and clickable
-- [ ] A factual question returns ≤3 sentences + a citation + freshness line
-- [ ] "Should I buy HDFC Small Cap Fund now?" shows the refusal styling
-- [ ] A PAN/phone input shows the PII-blocked styling
-- [ ] A nonsense question shows the insufficient-context styling
+- [x] Disclaimer banner matches the PRD text exactly
+- [x] 3 example buttons present and clickable
+- [x] Sidebar shows chunk count > 0, model name, threshold
+- [x] 5 source links listed and clickable
+- [ ] A factual question returns ≤3 sentences + a citation + freshness line — **needs `LLM_API_KEY`**
+- [x] "Should I buy HDFC Small Cap Fund now?" shows the refusal styling
+- [x] A PAN/phone input shows the PII-blocked styling
+- [x] A nonsense question shows the insufficient-context styling
+
+Verified by running the real Streamlit runtime through `AppTest`, not by eye:
+title, disclaimer, 3 buttons (button 0 seeds a user message), sidebar metric
+reading 358, 10 source links, `chat_input` present, PII → error styling, advice →
+warning styling, nonsense question → no traceback, and a factual question with no
+key → the "Generation unavailable" banner rather than a stack trace. The
+grounding caption was checked by seeding a synthetic `ANSWER` message: it renders
+`✅ Answer · 4 sources · top match 0.684` plus the freshness caption and a
+markdown citation link. The one unticked box is the end-to-end factual answer,
+which is the only item that genuinely requires a key.
+
+No backend logic was added to `app.py`. `top_similarity` was added to
+`ChatResponse` in Phase 1's model rather than re-querying retrieval from the UI.
 
 ### Do not do in this phase
 

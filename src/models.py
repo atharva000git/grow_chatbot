@@ -62,6 +62,10 @@ class ChatResponse:
     source_scheme: str | None
     last_updated: str
     retrieval_hits: int
+    # Top similarity of the hits behind this answer. Carried so the UI can show
+    # that an answer was actually grounded rather than asserting it. Defaulted so
+    # every existing construction site keeps working.
+    top_similarity: float | None = None
 
 
 @dataclass

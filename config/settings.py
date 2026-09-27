@@ -22,5 +22,6 @@ LLM_MAX_TOKENS = 220
 MAX_ANSWER_SENTENCES = 3
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
 LOG_QUERIES = False
 EDUCATIONAL_LINKS: dict[str, str] = {}
