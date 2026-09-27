@@ -1,0 +1,7 @@
+.env
+.venv/
+chroma/
+data/raw/
+data/embeddings/
+__pycache__/
+*.pyc
