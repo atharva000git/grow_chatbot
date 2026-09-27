@@ -18,7 +18,9 @@ from src.models import ChatResponse, PIIVerdict
 # reason: a 12-digit Aadhaar is also a valid 12-digit account number, and the
 # narrower, more specific pattern has to win so `matched_kinds` is honest.
 PII_PATTERNS: dict[str, re.Pattern[str]] = {
-    "pan": re.compile(r"\b[A-Z]{5}[0-9]{4}[A-Z]\b"),
+    # Case-insensitive: people type PANs in lower case, and an identifier is an
+    # identifier regardless of the case it was typed in.
+    "pan": re.compile(r"\b[a-z]{5}[0-9]{4}[a-z]\b", re.I),
     "aadhaar": re.compile(r"\b[2-9]\d{3}[\s-]?\d{4}[\s-]?\d{4}\b"),
     "account_no": re.compile(r"\b[0-9]{8,18}\b"),
     "otp": re.compile(r"\b(otp|one time password)\b.{0,15}\b\d{4,6}\b", re.I),
@@ -27,7 +29,16 @@ PII_PATTERNS: dict[str, re.Pattern[str]] = {
     # consecutive digits and therefore misses the format people actually type:
     # "+91 98765 43210". A phone number written with a space is still a phone
     # number, so one internal separator is allowed after the first five digits.
-    "phone": re.compile(r"(?:\+91[\s-]?)?\b[6-9]\d{4}[\s-]?\d{5}\b"),
+    # `\b` cannot sit between "+91" and the first digit - both are word
+    # characters, so there is no boundary there and "+919876543210" fell
+    # through to account_no and reported the wrong kind. A plain `(?<!\d)` in
+    # that position is also wrong: it rejects "+919876543210" because the
+    # preceding character is the "1" of the country code, while correctly
+    # refusing to read ten digits out of the middle of a twelve-digit account
+    # number. So the country code is consumed with a lookahead - "+91" already
+    # establishes the boundary - and only the bare-number branch gets the
+    # lookbehind.
+    "phone": re.compile(r"(?:\+91[\s-]?(?=\d)|(?<!\d))[6-9]\d{4}[\s-]?\d{5}(?!\d)"),
 }
 
 BLOCKED_MESSAGE = (

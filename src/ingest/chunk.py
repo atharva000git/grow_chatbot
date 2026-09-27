@@ -61,6 +61,10 @@ FACT_HEADER_MAX = 60
 # line, so these two ceilings are what distinguish a metric from prose.
 FIELD_LABEL_MAX = 45
 FIELD_VALUE_MAX = 30
+# Ceiling for a *bare* metric label line, as opposed to a `##` heading. Groww's
+# header labels are all 23 characters or fewer, while the value sentence that
+# follows one of them is 41. See metric_prefix.
+METRIC_LABEL_MAX = 30
 
 
 class ChunkingError(RuntimeError):
@@ -212,8 +216,20 @@ GROWW_METRICS: tuple[str, ...] = (
 
 
 def metric_prefix(line: str) -> str | None:
-    """Return the Groww metric this line introduces, if any."""
-    text = line.strip().lstrip("#").strip()
+    """Return the Groww metric this line introduces, if any.
+
+    A `##`-prefixed line is an explicit heading and is always honoured. A bare
+    line is only a label if it is short, because `startswith` also matches prose
+    that merely opens with the metric's words: the sentence "Exit load of 1% if
+    redeemed within 1 year" scored as the "Exit load" metric, which orphaned the
+    `## Exit load` heading and left the actual fact outside it. Every genuine bare
+    label in the corpus is 23 characters or fewer, so METRIC_LABEL_MAX cleanly
+    separates the two.
+    """
+    raw = line.strip()
+    text = raw.lstrip("#").strip()
+    if not raw.startswith("##") and len(raw) > METRIC_LABEL_MAX:
+        return None
     for metric in GROWW_METRICS:
         if text == metric or text.startswith(f"{metric} ") or text.startswith(f"{metric}:"):
             return metric
@@ -279,6 +295,19 @@ def segment_fields(text: str) -> list[tuple[str, str]]:
                 index += 1
                 continue
             break
+        # A metric whose value is longer than FIELD_VALUE_MAX still owns that
+        # line. Groww writes some values as a full sentence - "Exit load of 1% if
+        # redeemed within 1 year" is 41 characters - so the length guard above
+        # rejects it and the heading was emitted as a 12-character chunk with no
+        # value at all, while the real fact sat in the next chunk. The two halves
+        # of one fact embedding separately is what this function exists to
+        # prevent, so absorb one plain line even when it is too long to be a
+        # short field value.
+        if not body and index < len(lines):
+            nxt = lines[index].strip()
+            if nxt and metric_prefix(nxt) is None and not nxt.startswith("#"):
+                body.append(lines[index])
+                index += 1
         blocks.append((head, "\n".join(body).strip()))
     flush()
     return blocks
@@ -456,7 +485,14 @@ def chunk_html(text: str, strategy: str) -> list[str]:
         elif strategy == "semantic":
             out.extend(chunk_semantic(joined))
         else:
-            out.extend(chunk_recursive(joined))
+            # The prose floor applies here too. It was missing from this branch
+            # only, and because an oversized block is split on "##" boundaries,
+            # the omission let a bare heading through: "## Minimum investments"
+            # is 22 characters, has no value of its own, and was emitted as its
+            # own chunk in all five schemes. A heading whose values were already
+            # captured as separate metric chunks carries no retrievable fact,
+            # and it competes for the "minimum investment" query with nothing.
+            out.extend(c for c in chunk_recursive(joined) if len(c.strip()) >= settings.MIN_CHUNK_CHARS)
     return out + about
 
 

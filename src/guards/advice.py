@@ -37,7 +37,9 @@ ADVICE_PATTERNS: list[str] = [
     r"\bgood time to invest\b",
     r"\bhow much should i\b",
     r"\bbest for (me|my)\b",
-    r"\bbuild (me )?a portfolio\b",
+    # `\bbuild (me )?a portfolio\b` missed "Can you build me a balanced\n    # portfolio?" because the adjective sits between "a" and "portfolio". A
+    # compliance pattern that a single adjective defeats is not one.
+    r"\bbuild (?:me|us) an?[\w\s]{0,25}?\bportfolio\b",
     r"\bsuitable for me\b",
     r"\bhighest returns?\b",
     # "What is the best performing fund?" is a ranking request, and the spec's

@@ -126,12 +126,19 @@ def has_advice_language(text: str) -> bool:
 
 
 def _refusal(message: str, url: str, hits: list[RetrievedChunk]) -> ChatResponse:
+    """A refusal is a policy decision, not a fact drawn from a document.
+
+    So it carries no `last_updated`, matching `pii.block_response` and
+    `advice.refusal_response`. Both other refusal paths leave the field blank
+    for the same reason: stamping a source date onto fixed text would claim a
+    provenance the text does not have.
+    """
     return ChatResponse(
         intent="REFUSAL",
         answer_text=message,
         citation_url=url or None,
         source_scheme=hits[0].chunk.scheme if hits else None,
-        last_updated=newest_source_date(hits),
+        last_updated="",
         retrieval_hits=len(hits),
         top_similarity=hits[0].similarity if hits else None,
     )

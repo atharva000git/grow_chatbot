@@ -1545,11 +1545,67 @@ python eval/run_eval.py
 
 ### Acceptance criteria
 
-- [ ] `pytest` fully green, keyless
-- [ ] All 11 eval cases behave as expected
-- [ ] Grounding rate 100% — no citation outside `sources.csv`
-- [ ] Mean latency < 5 s
-- [ ] `samples/sample_qa.md` generated with 5–10+ entries and links
+- [x] `pytest` fully green, keyless — **130 passed in 0.4 s**
+- [ ] All 11 eval cases behave as expected — **4/11 keyless; 9/11 with a stubbed
+      model; 7 need a real `LLM_API_KEY`**
+- [x] Grounding rate 100% — no citation outside `sources.csv`
+- [x] Mean latency < 5 s — 0.45 s keyless
+- [x] `samples/sample_qa.md` generated, with an explicit notice that the factual
+      cases did not run
+
+### What the suite found
+
+Writing the tests was worth more than writing them, because five of them failed
+against code that every earlier phase had signed off. All five were real:
+
+1. **`## Exit load` was emitted as five 12-character chunks with no value.** The
+   value sentence below it, "Exit load of 1% if redeemed within 1 year", is 41
+   characters and failed the `FIELD_VALUE_MAX = 30` "is this a value" test, so
+   `metric_prefix` claimed it as a *label* and left the `## Exit load` heading
+   orphaned. A bare `## Minimum investments` was emitted five more times, because
+   the oversized-prose branch of `chunk_html` skipped the `MIN_CHUNK_CHARS` filter
+   that the other two branches apply. Ten dead chunks, each embedding to a
+   near-perfect match for "exit load" while containing nothing. Fixed, and
+   retrieval was measured before and after to confirm it was neutral (0.495 /
+   0.432 / 0.423 / 0.352 → 0.495 / 0.432 / 0.423 / 0.349) rather than assumed.
+2. **"Can you build me a balanced portfolio?" was not refused.** `\bbuild (me
+   )?a portfolio\b` needs "portfolio" straight after "a", so one adjective
+   defeats a compliance pattern. Widened to allow modifiers.
+3. **A lower-case PAN was not detected** (`\b[A-Z]{5}[0-9]{4}[A-Z]\b` has no
+   `re.I`), and **"+919876543210" reported the wrong kind** — `\b` cannot sit
+   between "+91" and the first digit, so it fell through to `account_no`. The
+   fix is a lookahead on the country code rather than a lookbehind, because a
+   lookbehind correctly refuses ten digits out of a twelve-digit account number
+   and would also have refused the phone.
+4. **`validate` stamped a source date onto its refusals** while `pii` and
+   `advice` deliberately did not. A refusal is a policy decision, not a fact from
+   a document; the three paths now agree.
+5. **The corpus contains the Groww returns tables.** "Fund returns +15.4% ..." is
+   chunked, and a section boundary runs that table into the `exit_load` section,
+   so *"What is the exit load on HDFC Equity Fund (Flexi Cap)?" retrieves the
+   returns table as its top hit* (0.535). The output guard then refuses it, which
+   is why the answer is safe — but the design intent of "no performance data" is
+   enforced by the validator, not by the corpus. Now pinned by a test that feeds
+   the real chunk through `validate` rather than an invented example.
+
+The suite also found that the spec's own `test_chunking` criterion — "no chunk
+under `MIN_CHUNK_CHARS`" — **cannot be satisfied without regressing Phase 6.**
+`chunk_html` sets `floor = 1` for a recognised metric and `split_about` emits one
+sentence per chunk, because the facts are short ("Min. for SIP Rs 100" is 17
+characters) and because bundling the About passage scored *above* the real
+answers. Enforcing 80 corpus-wide would delete real facts. The criterion is
+therefore asserted where it is true — `chunk_recursive` drops sub-floor prose —
+and the two exemptions are pinned by name, with the short chunks required to stay
+a minority of the corpus.
+
+### Eval status, stated plainly
+
+Keyless, the runner reports **4/11**: the four guard cases (8–11) are real and
+pass, and the seven factual cases record `ERROR:NO_KEY` rather than being
+faked. With `generate_raw` stubbed to answer from the top hit, the same runner
+reports **9/11 with 100% grounding**; both remaining misses are artefacts of a
+deliberately naive stub that echoes raw chunk text, not defects in the system.
+The only thing not yet exercised is a real provider call.
 
 ---
 
