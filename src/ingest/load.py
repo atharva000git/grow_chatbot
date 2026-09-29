@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import io
+import json
 import re
 import unicodedata
 from datetime import datetime, timezone
@@ -162,9 +163,18 @@ def _load_pdf_payload(url: str) -> bytes:
     return payload
 
 
-def load_source(doc: SourceDoc) -> SourceDoc:
+def load_source(doc: SourceDoc, fetched_at: str | None = None) -> SourceDoc:
+    """Clean one source, preferring the committed cleaned copy over the network.
+
+    `fetched_at` overrides the freshness stamp for a *cached* document. A
+    cleaned file on disk was fetched on the date recorded by whoever built the
+    index, not today, and the stamp is quoted to the user on every answer, so a
+    rebuild that stamps today silently moves a 3-week-old figure forward. The
+    override is ignored on the network path, where today genuinely is the
+    fetch date.
+    """
     raw_path, clean_path = _paths(doc.source_id, doc.source_type)
-    fetched_at = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
 
     if clean_path.exists() and clean_path.stat().st_size > 0:
         cleaned = clean_path.read_text(encoding="utf-8")
@@ -174,7 +184,7 @@ def load_source(doc: SourceDoc) -> SourceDoc:
             raw_path = Path("")
         return dataclasses.replace(
             doc,
-            fetched_at=fetched_at,
+            fetched_at=fetched_at or today,
             content_hash=_hash(cleaned),
             raw_path=str(raw_path),
             clean_path=str(clean_path),
@@ -202,7 +212,7 @@ def load_source(doc: SourceDoc) -> SourceDoc:
 
     return dataclasses.replace(
         doc,
-        fetched_at=fetched_at,
+        fetched_at=today,
         content_hash=_hash(cleaned),
         raw_path=str(raw_path),
         clean_path=str(clean_path),
@@ -213,11 +223,40 @@ def _hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
-def load_all() -> list[SourceDoc]:
+def load_fetched_at(path: Path) -> dict[str, str]:
+    """Read a source_id -> fetch-date map from JSON or from a chunks.jsonl.
+
+    Accepts the chunker's own output because that file is the corpus of record
+    committed to the repo: it is the only place the original fetch date of a
+    cached document still exists once `data/raw/` is gone. Chunk ids are
+    "<source_id>::cN", so the prefix is the source id and every chunk of a
+    document carries the same date.
+    """
+    if not path.exists():
+        return {}
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".jsonl":
+        dates: dict[str, str] = {}
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            source_id = str(row.get("chunk_id", "")).split("::", 1)[0]
+            stamp = str(row.get("fetched_at", ""))
+            if source_id and stamp:
+                dates.setdefault(source_id, stamp)
+        return dates
+    payload = json.loads(text)
+    if not isinstance(payload, dict):
+        raise IngestError(f"{path}: expected a source_id -> date object")
+    return {str(key): str(value) for key, value in payload.items() if value}
+
+
+def load_all(fetched_at: dict[str, str] | None = None) -> list[SourceDoc]:
     results: list[SourceDoc] = []
     for doc in build_source_docs():
         try:
-            results.append(load_source(doc))
+            results.append(load_source(doc, (fetched_at or {}).get(doc.source_id)))
         except IngestError as exc:
             print(f"FAILED {doc.source_id}: {exc}")
             raise

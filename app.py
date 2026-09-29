@@ -15,6 +15,7 @@ import streamlit as st
 
 from src.generation.llm import LLMUnavailable
 from src.generation.prompt import newest_source_date
+from src.ingest.bootstrap import ensure_index, index_is_built
 from src.models import load_sources
 from src.pipeline import answer_query, corpus_status
 
@@ -50,6 +51,13 @@ INTENT_STYLE = {
 
 st.title("HDFC Mutual Fund Facts Assistant")
 st.info(DISCLAIMER)
+
+# The index is a gitignored build artifact, so a fresh clone on Streamlit Cloud
+# or Render has none. Build it here rather than leaving the first question to
+# raise IndexNotBuilt. No-op once the index exists.
+if not index_is_built():
+    with st.spinner("Building the vector index from the committed corpus (first run only)..."):
+        ensure_index()
 
 status = corpus_status()
 with st.sidebar:

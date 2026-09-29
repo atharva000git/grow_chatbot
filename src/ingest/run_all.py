@@ -9,11 +9,12 @@ import argparse
 import logging
 import sys
 import time
+from pathlib import Path
 
 from config import settings
 from src.ingest.chunk import CHUNKS_PATH, chunk_all, save_chunks
 from src.ingest.embed import load_or_build_embeddings
-from src.ingest.load import load_all
+from src.ingest.load import load_all, load_fetched_at
 from src.ingest.manifest import build_manifest, write_manifest
 from src.ingest.store import build_index, reset_index
 
@@ -44,6 +45,13 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="delete the existing index before building",
     )
+    parser.add_argument(
+        "--fetched-at-from",
+        metavar="PATH",
+        help="JSON or chunks.jsonl mapping source_id -> the date its document was "
+        "originally fetched. Applied to cached documents only, so a rebuild from "
+        "committed data does not restamp every figure with today's date.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
     logging.basicConfig(
@@ -54,10 +62,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.rebuild:
         reset_index()
 
+    fetched_at = load_fetched_at(Path(args.fetched_at_from)) if args.fetched_at_from else None
+
     stage = _Stages()
 
     started = time.perf_counter()
-    docs = load_all()
+    docs = load_all(fetched_at)
     stage.record("load documents", len(docs), len(docs), time.perf_counter() - started)
 
     started = time.perf_counter()
