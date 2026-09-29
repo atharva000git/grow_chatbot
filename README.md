@@ -19,6 +19,8 @@ mutual-fund facts interface that guesses is worse than one that admits ignorance
 7. [Known limits](#7-known-limits)
 8. [Deliverables](#8-deliverables)
 9. [Disclaimer](#9-disclaimer)
+10. [Source List](#10-source-list)
+11. [Sample Questions](#10-sample-questions)
 
 ---
 
@@ -287,3 +289,30 @@ Verbatim from PRD §8.3, and identical in `app.py` and `samples/disclaimer.txt`:
 > official factsheet and your mutual fund distributor before acting. Mutual fund
 > investments are subject to market risks; read all scheme-related documents
 > carefully.
+
+## 10. Source List
+
+Large Cap: https://groww.in/mutual-funds/hdfc-large-cap-fund-direct-growth
+
+Flexi Cap: https://groww.in/mutual-funds/hdfc-equity-fund-direct-growth
+
+ELSS: https://groww.in/mutual-funds/hdfc-elss-tax-saver-fund-direct-plan-growth
+
+Small Cap: https://groww.in/mutual-funds/hdfc-small-cap-fund-direct-growth
+
+Balanced Advantage (Hybrid): https://groww.in/mutual-funds/hdfc-balanced-advantage-fund-direct-growth
+
+## 11. Sample Questions
+
+What is the expense ratio of HDFC Large Cap Fund – Direct Plan – Growth?
+What is the minimum SIP amount for HDFC Large Cap Fund – Direct Plan – Growth?
+Is there an exit load for HDFC Flexi Cap Fund – Direct Plan – Growth?
+What is the benchmark for HDFC Flexi Cap Fund – Direct Plan – Growth?
+What is the lock-in period for HDFC ELSS Tax Saver Fund – Direct Plan – Growth?
+What is the riskometer level for HDFC ELSS Tax Saver Fund – Direct Plan – Growth?
+What is the minimum SIP amount for HDFC Small Cap Fund – Direct Plan – Growth?
+What is the exit load for HDFC Small Cap Fund – Direct Plan – Growth?
+What is the benchmark for HDFC Balanced Advantage Fund – Direct Plan – Growth?
+What is the riskometer level for HDFC Balanced Advantage Fund – Direct Plan – Growth?
+How can I download an HDFC Mutual Fund account statement?
+How can I download an HDFC Mutual Fund capital-gains statement?
